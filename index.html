@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>capta-prospect</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.onerror = function(msg, url, line, col, error) {
+        const div = document.createElement('div');
+        div.style.position = 'fixed';
+        div.style.top = '0';
+        div.style.left = '0';
+        div.style.width = '100%';
+        div.style.height = '100%';
+        div.style.backgroundColor = '#1a1a1a';
+        div.style.color = '#ff4444';
+        div.style.padding = '40px';
+        div.style.zIndex = '999999';
+        div.style.fontFamily = 'monospace';
+        div.style.fontSize = '14px';
+        div.style.overflow = 'auto';
+        div.innerHTML = '<h1 style="color: white;">🔴 Erro Fatal Detectado</h1>' +
+          '<div style="background: #000; padding: 20px; border-radius: 8px; border: 1px solid #444;">' +
+          '<p><strong>Mensagem:</strong> ' + msg + '</p>' +
+          '<p><strong>Arquivo:</strong> ' + url + '</p>' +
+          '<p><strong>Linha/Col:</strong> ' + line + ':' + col + '</p>' +
+          '<pre style="white-space: pre-wrap; color: #aaa;">' + (error ? error.stack : 'Nenhum stack trace') + '</pre>' +
+          '</div>';
+        document.body.appendChild(div);
+      };
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

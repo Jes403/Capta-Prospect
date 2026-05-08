@@ -1,0 +1,149 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap');
+
+@theme {
+  --color-capta-bg: #0b1326;
+  --color-capta-primary: #2fd9f4;
+  --color-capta-surface-lowest: #060e20;
+  --color-capta-surface-low: #131b2e;
+  --color-capta-surface-high: #222a3d;
+  --color-capta-surface-highest: #2d3449;
+  
+  --font-space: "Space Grotesk", sans-serif;
+  --font-inter: "Inter", sans-serif;
+  
+  --radius-none: 0px;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  /* Shadcn UI Variables */
+  --background: var(--color-capta-bg);
+  --foreground: #ffffff;
+  --card: var(--color-capta-surface-low);
+  --card-foreground: #ffffff;
+  --popover: var(--color-capta-surface-low);
+  --popover-foreground: #ffffff;
+  --primary: var(--color-capta-primary);
+  --primary-foreground: #0b1326;
+  --secondary: var(--color-capta-surface-high);
+  --secondary-foreground: #ffffff;
+  --muted: var(--color-capta-surface-high);
+  --muted-foreground: #94a3b8;
+  --accent: var(--color-capta-surface-highest);
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: var(--color-capta-surface-high);
+  --input: var(--color-capta-surface-high);
+  --ring: var(--color-capta-primary);
+}
+
+body {
+  @apply bg-capta-bg text-white font-inter;
+  margin: 0;
+  overflow: hidden;
+}
+
+h1, h2, h3, h4, .font-display {
+  @apply font-space;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-capta-surface-lowest;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-capta-surface-high border border-capta-surface-lowest;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-capta-primary;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+@keyframes radar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes blip-appear {
+  0% { opacity: 0; transform: scale(0); }
+  20% { opacity: 1; transform: scale(1.5); }
+  100% { opacity: 0.6; transform: scale(1); }
+}
+
+.radar-sweep {
+  animation: radar-spin 4s linear infinite;
+  background: conic-gradient(from 90deg at 50% 50%, rgba(47, 217, 244, 0.1) 0deg, rgba(47, 217, 244, 0.8) 45deg, transparent 50deg);
+  transform-origin: center;
+}
+
+.radar-blip {
+  animation: blip-appear 3s ease-out infinite;
+  box-shadow: 0 0 10px var(--color-capta-primary), 0 0 20px var(--color-capta-primary);
+}
+
+.kanban-column {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 500px;
+}
+
+.kanban-card {
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  cursor: grab;
+}
+
+.kanban-card:active {
+  cursor: grabbing;
+  transform: scale(1.02) rotate(1deg);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+
+.kanban-card.dragging {
+  opacity: 0.4;
+  transform: scale(0.95);
+  border-style: dashed;
+  border-color: var(--color-capta-primary);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+/* Glassmorphism for menus */
+.glass-menu {
+  background: rgba(19, 27, 46, 0.95);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(47, 217, 244, 0.2);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5);
+}
+
+.glow-primary {
+  box-shadow: 0 0 20px rgba(47, 217, 244, 0.2);
+  transition: all 0.3s ease;
+}
+
+.glow-primary:hover {
+  box-shadow: 0 0 35px rgba(47, 217, 244, 0.4);
+  transform: translateY(-1px);
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
