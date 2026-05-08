@@ -50,6 +50,9 @@ COPY package*.json ./
 # Instalar dependências do projeto
 RUN npm install
 
+# Criar pasta de dados
+RUN mkdir -p data
+
 # Copiar o restante do código
 COPY . .
 
