@@ -19,6 +19,10 @@ app.use(cors());
 app.use(express.json());
 
 const DB_FILE = path.join(__dirname, '../data/receita_federal.db');
+const DATA_DIR = path.dirname(DB_FILE);
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 const db = new Database(DB_FILE);
 
 const JOBS = {};
