@@ -26,6 +26,25 @@ if (!fs.existsSync(DATA_DIR)) {
 const db = new Database(DB_FILE);
 
 const JOBS = {};
+
+// Rota para upload do banco de dados (Apenas para configuração inicial)
+app.post('/api/admin/upload-db', upload.single('database'), (req, res) => {
+  if (!req.file) return res.status(400).send('Nenhum arquivo enviado.');
+  
+  // O banco de dados SQLite precisa ser fechado antes de sobrescrever
+  db.close();
+  
+  const targetPath = DB_FILE;
+  fs.renameSync(req.file.path, targetPath);
+  
+  // Reabrir o banco
+  global.db = new Database(DB_FILE);
+  
+  res.send('Banco de dados atualizado com sucesso!');
+});
+
+// Helper para acessar o db globalmente se necessário
+global.db = db;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyAfw6Dx_zLagO_lQm9CHRwYS3IHb7Rbt_0";
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || "AIzaSyCJ-RbfpKYkvC-323zdOkdRuM3ysXC0m5c";
 const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN || "apify_api_9RWdIYeKUoDIBlCHyxenAdWhSwgBPj1ULTxQ";
