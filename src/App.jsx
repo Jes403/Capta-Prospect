@@ -33,7 +33,7 @@ import {
   Mail,
   Filter,
   LineChart,
-  Instagram
+  Camera
 } from 'lucide-react'
 
 import { Button } from "@/components/ui/button"
@@ -1101,7 +1101,7 @@ function AuthenticatedApp({ onLogout }) {
                                 <td className="p-4">
                                    <div className="flex gap-2">
                                      {lead["Site"] && <a href={lead["Site"]} target="_blank" className="p-1.5 bg-blue-500/10 text-blue-400 rounded hover:bg-blue-500/20"><Globe size={12} /></a>}
-                                     {lead["Instagram"] && <a href={lead["Instagram"]} target="_blank" className="p-1.5 bg-pink-500/10 text-pink-400 rounded hover:bg-pink-500/20"><Instagram size={12} /></a>}
+                                     {lead["Instagram"] && <a href={lead["Instagram"]} target="_blank" className="p-1.5 bg-pink-500/10 text-pink-400 rounded hover:bg-pink-500/20"><Camera size={12} /></a>}
                                      {lead["Google Maps"] && <a href={lead["Google Maps"]} target="_blank" className="p-1.5 bg-green-500/10 text-green-400 rounded hover:bg-green-500/20"><MapPin size={12} /></a>}
                                    </div>
                                 </td>
