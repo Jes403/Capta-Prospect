@@ -23,6 +23,9 @@ const DATA_DIR = path.dirname(DB_FILE);
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
+// Setup multer para Uploads
+const upload = multer({ dest: path.join(__dirname, 'uploads/') });
+
 const db = new Database(DB_FILE);
 
 const JOBS = {};
@@ -329,9 +332,6 @@ try {
   console.error('Erro ao ler schema:', e.message);
 }
 console.log('-----------------------------------');
-
-// Setup multer for LinkedIn Uploads
-const upload = multer({ dest: path.join(__dirname, 'uploads/') });
 
 // Mapping of common Cities to SIAFI codes
 const SIAFI_CITIES = {
