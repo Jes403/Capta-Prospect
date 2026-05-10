@@ -442,7 +442,7 @@ app.post('/api/receita/scan', async (req, res) => {
     if (leads.length === 0) {
       console.log("[🤖] Ativando Robô Caçador (Casa dos Dados)...");
       const scraped = await mineCasaDosDados({ cnae, uf, municipio: cidade });
-      leads = scraped.map(l => ({
+      leads = (scraped || []).filter(l => l && l.razao_social).map(l => ({
         ...l,
         name: l.razao_social,
         origin: 'Receita (Robô)',
@@ -454,15 +454,6 @@ app.post('/api/receita/scan', async (req, res) => {
   } catch (error) {
     console.error('❌ [ERRO BACKEND]:', error);
     res.status(500).json({ error: error.message });
-  }
-});
-
-  } catch (error) {
-    console.error('❌ [ERRO CRÍTICO BACKEND]:', error);
-    res.status(500).json({ 
-      error: `Erro no servidor: ${error.message}`,
-      details: 'Verifique se o banco de dados receita_federal.db está na pasta data/ e se as tabelas existem.'
-    });
   }
 });
 
@@ -481,6 +472,10 @@ app.post('/api/receita/qualify', async (req, res) => {
     job.logs.push({ type: 'info', text: `[🚀] Iniciando qualificação de ${leads.length} leads da Receita...` });
 
     for (const lead of leads) {
+      if (!lead || !lead.name) {
+        job.processed++;
+        continue;
+      }
       try {
         job.logs.push({ type: 'info', text: `[🔍] Analisando: ${lead.name}...` });
         const qualified = await qualifyLead(lead, job);
