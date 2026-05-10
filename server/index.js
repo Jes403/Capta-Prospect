@@ -33,7 +33,7 @@ const db = new Database(DB_FILE);
 // --- CONFIGURAÇÃO TURSO (SQL NA NUVEM) ---
 const turso = createClient({
   url: process.env.TURSO_URL || "libsql://capta-jes403.aws-us-east-1.turso.io",
-  authToken: process.env.TURSO_TOKEN || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzb0t3aVV3bUVmR0ZzVVlaVGt3WUFnIiwib3JnX2lkIjoxMDAwMTYyMzY4fQ.k3-TC6elOndhBUrbWCvsvExeem7QqXQq__L10bVXIjLYUwTV_iLTDoyQBhdOIm1KGPyF1lMIjrz03Zm2QyLDDg",
+  authToken: process.env.TURSO_TOKEN || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzgzODc4MTMsImlkIjoiMDE5ZTEwMjctNjMwMS03NWIxLWExMDMtMzA5M2QwMWQyZDExIiwicmlkIjoiNjdmNjBmNDUtYmQ3ZC00NDQxLTk4NDMtM2UwOTViMmJiMWNhIn0.SqtELBXXp53hhCOwxDQ72llcRRSGYyMGSGOoWBt6OpY-DFWz3wOkO7ciWYdVH9iu57sKVMND1Ih7_lit2uEaDg",
 });
 
 const JOBS = {};
