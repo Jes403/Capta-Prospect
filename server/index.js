@@ -164,8 +164,12 @@ async function mineCasaDosDados(filters) {
     });
     
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.setViewport({ width: 1280, height: 800 });
+    // User Agent de um Chrome atual no Windows
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1366, height: 768 });
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    });
 
     console.log(`[🔍] Iniciando mineração na Casa dos Dados:`, filters);
     
@@ -194,18 +198,24 @@ async function mineCasaDosDados(filters) {
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
     }
 
+    // Esperar um pouco para os resultados carregarem
+    await new Promise(r => setTimeout(r, 3000));
+
     const leads = await page.evaluate(() => {
       const results = [];
-      const cards = document.querySelectorAll('.box');
-      cards.forEach(card => {
-        const titleLink = card.querySelector('a.has-text-primary');
-        const pTags = Array.from(card.querySelectorAll('p'));
-        const cnpjTag = pTags.find(p => p.innerText.includes('-'));
+      // Tenta encontrar todos os links que apontam para um CNPJ, que ficam dentro dos cards
+      const links = document.querySelectorAll('a[href*="/cnpj/"]');
+      
+      links.forEach(link => {
+        const card = link.closest('.box') || link.closest('.card') || link.parentElement;
+        const razaoSocial = link.innerText.trim();
+        const textContent = card ? card.innerText : "";
+        const cnpjMatch = textContent.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
         
-        if (titleLink && cnpjTag) {
+        if (razaoSocial && cnpjMatch) {
           results.push({
-            cnpj: cnpjTag.innerText.replace(/\D/g, ''),
-            razao_social: titleLink.innerText.trim(),
+            cnpj: cnpjMatch[0].replace(/\D/g, ''),
+            razao_social: razaoSocial,
             situacao: 'ATIVA'
           });
         }
@@ -213,7 +223,7 @@ async function mineCasaDosDados(filters) {
       return results;
     });
 
-    console.log(`[✅] Mineração concluída. Encontrados ${leads.length} leads.`);
+    console.log(`[🛰️] Captura finalizada. Brutos encontrados: ${leads.length}`);
     return leads;
 
   } catch (error) {
