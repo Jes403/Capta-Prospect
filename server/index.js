@@ -451,11 +451,18 @@ app.post('/api/receita/scan', async (req, res) => {
     // FALLBACK: SE NÃO TEM LEADS NO SQLITE, USA O ROBÔ NA CASA DOS DADOS
     if (leads.length === 0) {
       console.log("[🤖] Ativando Robô Caçador (Casa dos Dados)...");
-      const scraped = await mineCasaDosDados({ cnae, uf, municipio: cidade });
+      
+      // Se houver nicho selecionado, pega o primeiro CNAE do nicho para o robô
+      let searchCnae = cnae;
+      if (niche && NICHE_CONFIG[niche]) {
+        searchCnae = NICHE_CONFIG[niche].cnaes[0];
+      }
+
+      const scraped = await mineCasaDosDados({ cnae: searchCnae, uf, municipio: cidade });
       leads = (scraped || []).filter(l => l && l.razao_social).map(l => ({
         ...l,
         name: l.razao_social,
-        origin: 'Receita (Robô)',
+        origin: `Receita (Robô - ${niche || 'Geral'})`,
         status: 'new'
       }));
     }
