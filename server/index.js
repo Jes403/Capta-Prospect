@@ -11,6 +11,8 @@ import { load } from 'cheerio';
 import puppeteer from 'puppeteer';
 import https from 'https';
 
+import { createClient } from '@libsql/client';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -27,6 +29,12 @@ if (!fs.existsSync(DATA_DIR)) {
 const upload = multer({ dest: path.join(__dirname, 'uploads/') });
 
 const db = new Database(DB_FILE);
+
+// --- CONFIGURAÇÃO TURSO (SQL NA NUVEM) ---
+const turso = createClient({
+  url: process.env.TURSO_URL || "libsql://capta-jes403.aws-us-east-1.turso.io",
+  authToken: process.env.TURSO_TOKEN || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzb0t3aVV3bUVmR0ZzVVlaVGt3WUFnIiwib3JnX2lkIjoxMDAwMTYyMzY4fQ.k3-TC6elOndhBUrbWCvsvExeem7QqXQq__L10bVXIjLYUwTV_iLTDoyQBhdOIm1KGPyF1lMIjrz03Zm2QyLDDg",
+});
 
 const JOBS = {};
 
@@ -395,44 +403,50 @@ app.post('/api/receita/scan', async (req, res) => {
   
   try {
     const upperCidade = cidade ? cidade.toUpperCase().trim() : '';
-    const siafiCode = SIAFI_CITIES[upperCidade];
-
     let leads = [];
 
-    // TENTA BUSCAR NO SQLITE (SE EXISTIR)
-    if (fs.existsSync(DB_FILE)) {
+    // --- PRIORIDADE 1: TURSO (SQL NA NUVEM) ---
+    console.log("[☁️] Buscando no Turso (SQL Cloud)...");
+    try {
+      // Simplificando a query para o Turso para garantir compatibilidade inicial
+      let sql = `SELECT * FROM estabelecimentos WHERE 1=1`;
+      const params = [];
+      
+      if (uf) {
+        sql += ` AND uf = ?`;
+        params.push(uf);
+      }
+      
+      if (cnae) {
+        sql += ` AND cnae_principal LIKE ?`;
+        params.push(`${cnae}%`);
+      }
+      
+      sql += ` LIMIT 100`;
+
+      const result = await turso.execute({ sql, args: params });
+      
+      leads = result.rows.map(row => ({
+        id: row.id || `rec_${Math.random().toString(36).substr(2, 9)}`,
+        name: row.nome_fantasia || row.razao_social || 'EMPRESA SEM NOME',
+        cnpj: row.cnpj || row.cnpj_basico || '',
+        loc: `${row.logradouro || ''}, ${row.numero || ''} - ${row.uf}`,
+        origin: 'Receita (Turso Cloud)',
+        status: 'new'
+      }));
+      
+      console.log(`[☁️] Turso retornou ${leads.length} leads.`);
+    } catch (tursoErr) {
+      console.error("[☁️❌] Erro no Turso:", tursoErr.message);
+    }
+
+    // --- PRIORIDADE 2: SQLITE LOCAL (SE O TURSO FALHAR OU ESTIVER VAZIO E O ARQUIVO EXISTIR) ---
+    if (leads.length === 0 && fs.existsSync(DB_FILE)) {
       try {
-        // Detectar tabelas disponíveis
-        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
-        const hasEmpresas = tables.includes('empresas') || tables.includes('empresa');
-        const tableEmpresas = tables.includes('empresas') ? 'empresas' : 'empresa';
-        const hasSocios = tables.includes('socios') || tables.includes('socio');
-        const tableSocios = tables.includes('socios') ? 'socios' : 'socio';
-        const tableEstab = tables.includes('estabelecimentos') ? 'estabelecimentos' : 'estabelecimento';
-
-        // Detectar colunas de estabelecimento
-        const rawEstabCols = db.prepare(`PRAGMA table_info(${tableEstab})`).all();
-        const findCol = (cols, targets) => {
-          for (const t of targets) {
-            const found = cols.find(c => c.name.toLowerCase() === t.toLowerCase() || c.name.toLowerCase().startsWith(t.toLowerCase()));
-            if (found) return found.name;
-          }
-          return cols[0].name;
-        };
-
-        const cnpjColEstab = findCol(rawEstabCols, ['cnpj_basico', 'cnpj_base', 'cnpj']);
-
-        let sql = `
-          SELECT 
-            e.*
-            ${hasEmpresas ? `, em.razao_social, em.natureza_juridica, em.porte` : ''}
-          FROM ${tableEstab} e 
-          ${hasEmpresas ? `LEFT JOIN ${tableEmpresas} em ON e.${cnpjColEstab} = em.cnpj_basico` : ''}
-          WHERE 1=1
-          LIMIT 50
-        `;
-        
-        leads = db.prepare(sql).all().map(row => ({
+        console.log("[🗄️] Buscando no SQLite Local...");
+        // (Mantendo a lógica simplificada para o SQLite local se necessário)
+        const localResult = db.prepare("SELECT * FROM estabelecimentos LIMIT 50").all();
+        leads = localResult.map(row => ({
             id: row.id || `rec_${Math.random().toString(36).substr(2, 9)}`,
             name: row.nome_fantasia || row.razao_social || 'EMPRESA SEM NOME',
             cnpj: row.cnpj || row.cnpj_basico || '',
@@ -440,21 +454,18 @@ app.post('/api/receita/scan', async (req, res) => {
             origin: 'Receita (Local)',
             status: 'new'
         }));
-      } catch (e) {
-        console.log("[🗄️] Erro ou Banco vazio, usando robô...");
+      } catch (localErr) {
+        console.log("[🗄️❌] SQLite Local vazio ou falhou.");
       }
     }
 
-    // FALLBACK: SE NÃO TEM LEADS NO SQLITE, USA O ROBÔ NA CASA DOS DADOS
+    // --- PRIORIDADE 3: ROBÔ (FALLBACK FINAL) ---
     if (leads.length === 0) {
       console.log("[🤖] Ativando Robô Caçador (Casa dos Dados)...");
-      
-      // Se houver nicho selecionado, pega o primeiro CNAE do nicho para o robô
       let searchCnae = cnae;
       if (niche && NICHE_CONFIG[niche]) {
         searchCnae = NICHE_CONFIG[niche].cnaes[0];
       }
-
       const scraped = await mineCasaDosDados({ cnae: searchCnae, uf, municipio: cidade });
       leads = (scraped || []).filter(l => l && l.razao_social).map(l => ({
         ...l,
