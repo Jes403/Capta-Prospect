@@ -147,6 +147,80 @@ async function discoverSite(companyName, city, job) {
   }
 }
 
+
+/**
+ * Mineração Proativa via Casa dos Dados (Web Scraping)
+ * Filtra empresas por CNAE, Estado e Cidade em tempo real.
+ */
+async function mineCasaDosDados(filters) {
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      headless: "new"
+    });
+    
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1280, height: 800 });
+
+    console.log(`[🔍] Iniciando mineração na Casa dos Dados:`, filters);
+    
+    await page.goto('https://casadosdados.com.br/solucoes/cnpj/pesquisa-avancada', { 
+      waitUntil: 'networkidle2',
+      timeout: 60000 
+    });
+
+    if (filters.cnae) {
+      const cnaeInput = 'input[placeholder="Atividade Econômica (CNAE)"]';
+      await page.waitForSelector(cnaeInput, { timeout: 10000 });
+      await page.type(cnaeInput, filters.cnae);
+      await new Promise(r => setTimeout(r, 1500));
+      await page.keyboard.press('Enter');
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    if (filters.uf) {
+      await page.select('select.input', filters.uf); 
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    const searchBtn = await page.$('button.is-success');
+    if (searchBtn) {
+      await searchBtn.click();
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+    }
+
+    const leads = await page.evaluate(() => {
+      const results = [];
+      const cards = document.querySelectorAll('.box');
+      cards.forEach(card => {
+        const titleLink = card.querySelector('a.has-text-primary');
+        const pTags = Array.from(card.querySelectorAll('p'));
+        const cnpjTag = pTags.find(p => p.innerText.includes('-'));
+        
+        if (titleLink && cnpjTag) {
+          results.push({
+            cnpj: cnpjTag.innerText.replace(/\D/g, ''),
+            razao_social: titleLink.innerText.trim(),
+            situacao: 'ATIVA'
+          });
+        }
+      });
+      return results;
+    });
+
+    console.log(`[✅] Mineração concluída. Encontrados ${leads.length} leads.`);
+    return leads;
+
+  } catch (error) {
+    console.error(`[❌] Erro na mineração Casa dos Dados:`, error.message);
+    return [];
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
 /**
  * MOTOR DE QUALIFICAÇÃO OFICIAL (CAPTA)
  * Segue as regras do instrucoes.txt: Status Site, Nome Comercial (<title>), Instagram e Maps.
@@ -307,7 +381,7 @@ const NICHE_CONFIG = {
   }
 };
 
-app.post('/api/receita/scan', (req, res) => {
+app.post('/api/receita/scan', async (req, res) => {
   const { uf, cidade, cnae, segmento, niche, excludeMei = true, ping = false } = req.body;
   
   if (ping) return res.json({ status: 'online' });
@@ -316,141 +390,72 @@ app.post('/api/receita/scan', (req, res) => {
     const upperCidade = cidade ? cidade.toUpperCase().trim() : '';
     const siafiCode = SIAFI_CITIES[upperCidade];
 
-    // Detectar tabelas disponíveis
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
-    const hasEmpresas = tables.includes('empresas') || tables.includes('empresa');
-    const tableEmpresas = tables.includes('empresas') ? 'empresas' : 'empresa';
-    const hasSocios = tables.includes('socios') || tables.includes('socio');
-    const tableSocios = tables.includes('socios') ? 'socios' : 'socio';
-    const tableEstab = tables.includes('estabelecimentos') ? 'estabelecimentos' : 'estabelecimento';
+    let leads = [];
 
-    // Detectar colunas de estabelecimento
-    const rawEstabCols = db.prepare(`PRAGMA table_info(${tableEstab})`).all();
-    const findCol = (cols, targets) => {
-      for (const t of targets) {
-        const found = cols.find(c => c.name.toLowerCase() === t.toLowerCase() || c.name.toLowerCase().startsWith(t.toLowerCase()));
-        if (found) return found.name;
-      }
-      return cols[0].name;
-    };
+    // TENTA BUSCAR NO SQLITE (SE EXISTIR)
+    if (fs.existsSync(DB_FILE)) {
+      try {
+        // Detectar tabelas disponíveis
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
+        const hasEmpresas = tables.includes('empresas') || tables.includes('empresa');
+        const tableEmpresas = tables.includes('empresas') ? 'empresas' : 'empresa';
+        const hasSocios = tables.includes('socios') || tables.includes('socio');
+        const tableSocios = tables.includes('socios') ? 'socios' : 'socio';
+        const tableEstab = tables.includes('estabelecimentos') ? 'estabelecimentos' : 'estabelecimento';
 
-    const cnpjColEstab = findCol(rawEstabCols, ['cnpj_basico', 'cnpj_base', 'cnpj']);
-    const nameColEstab = findCol(rawEstabCols, ['nome_fantasia', 'razao_social', 'nome']);
+        // Detectar colunas de estabelecimento
+        const rawEstabCols = db.prepare(`PRAGMA table_info(${tableEstab})`).all();
+        const findCol = (cols, targets) => {
+          for (const t of targets) {
+            const found = cols.find(c => c.name.toLowerCase() === t.toLowerCase() || c.name.toLowerCase().startsWith(t.toLowerCase()));
+            if (found) return found.name;
+          }
+          return cols[0].name;
+        };
 
-    // Detectar colunas de Empresas e Sócios de forma independente
-    let cnpjColEmpresas = cnpjColEstab;
-    if (hasEmpresas) {
-      const rawEmpCols = db.prepare(`PRAGMA table_info(${tableEmpresas})`).all();
-      cnpjColEmpresas = findCol(rawEmpCols, ['cnpj_basico', 'cnpj_base', 'cnpj']);
-    }
+        const cnpjColEstab = findCol(rawEstabCols, ['cnpj_basico', 'cnpj_base', 'cnpj']);
 
-    let cnpjColSocios = cnpjColEstab;
-    let nameColSocios = 'nome_socio';
-    if (hasSocios) {
-      const rawSocCols = db.prepare(`PRAGMA table_info(${tableSocios})`).all();
-      cnpjColSocios = findCol(rawSocCols, ['cnpj_basico', 'cnpj_base', 'cnpj']);
-      nameColSocios = findCol(rawSocCols, ['nome_socio', 'nome', 'socio']);
-    }
-
-    let sql = `
-      SELECT 
-        e.*
-        ${hasEmpresas ? `, em.razao_social, em.natureza_juridica, em.porte` : ''}
-        ${hasSocios ? `, (SELECT ${nameColSocios} FROM ${tableSocios} s WHERE s.${cnpjColSocios} = e.${cnpjColEstab} LIMIT 1) as dono` : ''}
-      FROM ${tableEstab} e 
-      ${hasEmpresas ? `LEFT JOIN ${tableEmpresas} em ON e.${cnpjColEstab} = em.${cnpjColEmpresas}` : ''}
-      WHERE 1=1
-    `;
-    
-    // Filtro de Situação (se existir a coluna)
-    if (rawEstabCols.some(c => c.name.toLowerCase() === 'situacao')) {
-      sql += ` AND e.situacao = '02'`;
-    }
-    const params = [];
-
-    // Filtro Anti-MEI (Natureza Jurídica 2135 é Empresário Individual / MEI)
-    if (excludeMei && hasEmpresas) {
-      sql += ` AND em.natureza_juridica != '2135'`;
-    }
-
-    if (uf) {
-      sql += ` AND e.uf = ?`;
-      params.push(uf);
-    }
-
-    // Lógica de Nicho Estratégico
-    if (niche && NICHE_CONFIG[niche]) {
-      const nicheData = NICHE_CONFIG[niche];
-      const columnCnae = findCol(rawEstabCols, ['cnae_principal', 'cnae_fiscal_principal', 'cnae']);
-      const cnaeFilters = nicheData.cnaes.map(c => `e.${columnCnae} LIKE '${c}%'`).join(' OR ');
-      sql += ` AND (${cnaeFilters})`;
-    } else if (cnae) {
-      const columnCnae = findCol(rawEstabCols, ['cnae_principal', 'cnae_fiscal_principal', 'cnae']);
-      sql += ` AND e.${columnCnae} LIKE ?`;
-      params.push(`${cnae}%`);
-    }
-
-    if (upperCidade && siafiCode) {
-      sql += ` AND e.municipio = ?`;
-      params.push(siafiCode);
-    }
-
-    if (segmento) {
-      if (hasEmpresas) {
-        sql += ` AND (e.nome_fantasia LIKE ? OR em.razao_social LIKE ?)`;
-        params.push(`%${segmento.toUpperCase().trim()}%`, `%${segmento.toUpperCase().trim()}%`);
-      } else {
-        sql += ` AND e.nome_fantasia LIKE ?`;
-        params.push(`%${segmento.toUpperCase().trim()}%`);
+        let sql = `
+          SELECT 
+            e.*
+            ${hasEmpresas ? `, em.razao_social, em.natureza_juridica, em.porte` : ''}
+          FROM ${tableEstab} e 
+          ${hasEmpresas ? `LEFT JOIN ${tableEmpresas} em ON e.${cnpjColEstab} = em.cnpj_basico` : ''}
+          WHERE 1=1
+          LIMIT 50
+        `;
+        
+        leads = db.prepare(sql).all().map(row => ({
+            id: row.id || `rec_${Math.random().toString(36).substr(2, 9)}`,
+            name: row.nome_fantasia || row.razao_social || 'EMPRESA SEM NOME',
+            cnpj: row.cnpj || row.cnpj_basico || '',
+            loc: `${row.logradouro || ''}, ${row.numero || ''} - ${row.uf}`,
+            origin: 'Receita (Local)',
+            status: 'new'
+        }));
+      } catch (e) {
+        console.log("[🗄️] Erro ou Banco vazio, usando robô...");
       }
     }
 
-    sql += ` LIMIT 2000`;
-
-    console.log(`[QUERY] Executando busca inteligente no SQLite...`);
-    console.log(`[SQL] ${sql}`);
-    console.log(`[PARAMS] ${JSON.stringify(params)}`);
-    
-    let rows = [];
-    try {
-      rows = db.prepare(sql).all(params);
-    } catch (sqlError) {
-      console.error('❌ Erro na consulta SQL:', sqlError.message);
-      // Fallback: Tentar usar 'cnae' em vez de 'cnae_principal' se falhar
-      if (sqlError.message.includes('no such column: e.cnae_principal')) {
-        console.log('⚠️ Tentando fallback para coluna "cnae"...');
-        const fallbackSql = sql.replace(/e\.cnae_principal/g, 'e.cnae');
-        rows = db.prepare(fallbackSql).all(params);
-      } else {
-        throw sqlError;
-      }
+    // FALLBACK: SE NÃO TEM LEADS NO SQLITE, USA O ROBÔ NA CASA DOS DADOS
+    if (leads.length === 0) {
+      console.log("[🤖] Ativando Robô Caçador (Casa dos Dados)...");
+      const scraped = await mineCasaDosDados({ cnae, uf, municipio: cidade });
+      leads = scraped.map(l => ({
+        ...l,
+        name: l.razao_social,
+        origin: 'Receita (Robô)',
+        status: 'new'
+      }));
     }
 
-    const leads = rows.map(row => {
-      const phone1 = row.tel1 || row.telefone_1 || row.ddd_1 && `${row.ddd_1}${row.telefone_1}`;
-      const phone2 = row.tel2 || row.telefone_2 || row.ddd_2 && `${row.ddd_2}${row.telefone_2}`;
-      const email = row.email || row.correio_eletronico;
-      const logradouro = row.logradouro || row.nome_logradouro;
-
-      return {
-        id: row.id || `rec_${Math.random().toString(36).substr(2, 9)}`,
-        name: row.nome_fantasia || row.razao_social || 'EMPRESA SEM NOME',
-        contact: phone1 || phone2 || email || 'Sem contato',
-        email: email,
-        phones: [phone1, phone2].filter(Boolean),
-        loc: `${logradouro || ''}, ${row.numero || ''} - ${row.bairro || ''} | ${upperCidade || 'SIAFI: '+row.municipio} - ${row.uf}`,
-        origin: 'Receita',
-        status: 'new',
-        site: row.site || '',
-        instagram: '',
-        dono: row.dono || 'Não identificado',
-        natureza_juridica: row.natureza_juridica,
-        porte: row.porte
-      };
-    });
-
-    console.log(`[SCAN] Busca concluída. Encontrados ${leads.length} leads.`);
     res.json({ leads });
+  } catch (error) {
+    console.error('❌ [ERRO BACKEND]:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
   } catch (error) {
     console.error('❌ [ERRO CRÍTICO BACKEND]:', error);
@@ -656,6 +661,16 @@ app.delete('/api/hunter/gmn_leads', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3006;
+app.post('/api/mine/casadosdados', async (req, res) => {
+  const { cnae, uf, municipio } = req.body;
+  try {
+    const leads = await mineCasaDosDados({ cnae, uf, municipio });
+    res.json({ success: true, leads });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[CAPTA-NC] Backend Master rodando na porta ${PORT}`);
 });
