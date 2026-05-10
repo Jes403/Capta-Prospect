@@ -171,31 +171,28 @@ async function mineCasaDosDados(filters) {
       'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     });
 
-    console.log(`[🔍] Iniciando mineração na Casa dos Dados:`, filters);
+    console.log(`[🔍] Iniciando mineração via URL DIRETA:`, filters);
     
-    await page.goto('https://casadosdados.com.br/solucoes/cnpj/pesquisa-avancada', { 
-      waitUntil: 'networkidle2',
+    // Monta a URL de busca direta para evitar bloqueios de interação
+    const baseUrl = 'https://casadosdados.com.br/solucoes/cnpj/pesquisa-avancada/resultado';
+    const params = new URLSearchParams();
+    if (filters.cnae) params.append('cnae', filters.cnae);
+    if (filters.uf) params.append('uf', filters.uf);
+    if (filters.municipio) params.append('municipio', filters.municipio.toUpperCase());
+    
+    const searchUrl = `${baseUrl}?${params.toString()}`;
+    console.log(`[🛰️] Acessando: ${searchUrl}`);
+
+    await page.goto(searchUrl, { 
+      waitUntil: 'domcontentloaded',
       timeout: 60000 
     });
 
-    if (filters.cnae) {
-      const cnaeInput = 'input[placeholder="Atividade Econômica (CNAE)"]';
-      await page.waitForSelector(cnaeInput, { timeout: 10000 });
-      await page.type(cnaeInput, filters.cnae);
-      await new Promise(r => setTimeout(r, 1500));
-      await page.keyboard.press('Enter');
-      await new Promise(r => setTimeout(r, 1000));
-    }
-
-    if (filters.uf) {
-      await page.select('select.input', filters.uf); 
-      await new Promise(r => setTimeout(r, 500));
-    }
-
-    const searchBtn = await page.$('button.is-success');
-    if (searchBtn) {
-      await searchBtn.click();
-      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+    // Espera o seletor principal ou um sinal de que não há resultados
+    try {
+      await page.waitForSelector('.box', { timeout: 15000 });
+    } catch (e) {
+      console.log("[⚠️] Timeout aguardando resultados ou página bloqueada.");
     }
 
     // Esperar um pouco para os resultados carregarem
