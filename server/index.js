@@ -581,6 +581,57 @@ app.post('/api/hunter/gmn_api', async (req, res) => {
   })();
 });
 
+// --- NOVO MOTOR DE INJEÇÃO (BOOKMARKLET) ---
+app.post('/api/gmn/inject', async (req, res) => {
+  const { leads } = req.body;
+  if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: "Leads array required" });
+
+  const jobId = `inject_${Date.now()}`;
+  JOBS[jobId] = { type: 'gmn', status: 'processing', total: leads.length, processed: 0, results: [], logs: [] };
+  
+  res.json({ job_id: jobId, message: 'Injeção recebida! Iniciando qualificação...' });
+
+  (async () => {
+    const job = JOBS[jobId];
+    job.logs.push({ type: 'info', text: `[📥] Recebidos ${leads.length} leads via Injetor.` });
+
+    for (const raw of leads) {
+      try {
+        job.logs.push({ type: 'info', text: `[🔍] Qualificando: ${raw.name}...` });
+        
+        const leadBase = {
+          "Nome Empresa": String(raw.name || "EMPRESA DESCONHECIDA").toUpperCase(),
+          "Telefone 1": String(raw.phone || "").replace(/[^\d]/g, ''),
+          "Site": raw.site || "",
+          "Google Maps": raw.link || "",
+          "Endereço": raw.address || "",
+          "Nota": String(raw.rating || "0"),
+          "Avaliações": String(raw.reviews || "0"),
+          origin: 'Maps (Injetor)'
+        };
+
+        const enriched = await qualifyLead(leadBase, job);
+        
+        // Evitar duplicatas na store global
+        const exists = GMN_LEADS_STORE.leads.some(l => l["Google Maps"] === enriched["Google Maps"]);
+        if (!exists) {
+          GMN_LEADS_STORE.leads.unshift(enriched); // Adiciona no topo
+          saveGmnLeads();
+        }
+
+        job.results.push(enriched);
+        job.processed++;
+      } catch (e) {
+        console.error("Erro qualify inject:", e);
+        job.processed++;
+      }
+    }
+
+    job.status = 'idle';
+    job.logs.push({ type: 'success', text: `[🏆] Injeção concluída com sucesso!` });
+  })();
+});
+
 app.post('/api/hunter/gmn', async (req, res) => {
   const { keyword, location, minReviews, minRating } = req.body;
   if (!keyword) return res.status(400).json({ error: "Keyword required" });
@@ -591,6 +642,7 @@ app.post('/api/hunter/gmn', async (req, res) => {
 
   (async () => {
     const job = JOBS[jobId];
+
     let browser;
     try {
       job.logs.push({ type: 'info', text: `[🔍 ROBÔ] Iniciando navegador...` });

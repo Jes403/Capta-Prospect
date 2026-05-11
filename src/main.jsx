@@ -35,10 +35,11 @@ import { ConvexAuthProvider } from '@convex-dev/auth/react'
 import './index.css'
 import App from './App.jsx'
 
-try {
-  const convexUrl = import.meta.env.VITE_CONVEX_URL;
+  // Fallback direto para o seu projeto do Convex caso a Vercel falhe em ler a variável
+  const convexUrl = import.meta.env.VITE_CONVEX_URL || "https://accurate-tiger-693.convex.cloud";
+  
   if (!convexUrl) {
-    throw new Error("VITE_CONVEX_URL não está definida no arquivo .env");
+    throw new Error("VITE_CONVEX_URL não está definida.");
   }
   
   const convex = new ConvexReactClient(convexUrl);

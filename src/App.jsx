@@ -243,6 +243,17 @@ function AuthenticatedApp({ onLogout }) {
     fetchGmnLeads();
   }, []);
 
+  // Polling automático para sincronizar leads do Maps em tempo real
+  useEffect(() => {
+    let interval;
+    if (activeTab === 'maps') {
+      interval = setInterval(() => {
+        fetchGmnLeads();
+      }, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
   const handleStartMapsScan = async (mode = 'robot') => {
     if (!filtrosMaps.keyword) return alert("Digite um termo de busca!");
     
@@ -953,6 +964,7 @@ function AuthenticatedApp({ onLogout }) {
             </div>
           )}
 
+<<<<<<< HEAD
           {/* EXTRAÇÃO MAPS - PREMIUM ROBOT */}
           {activeTab === 'maps' && (
             <div className="space-y-6 animate-in fade-in duration-500 h-full flex flex-col">
@@ -1123,6 +1135,193 @@ function AuthenticatedApp({ onLogout }) {
                       </div>
                     )}
                   </div>
+=======
+          {/* EXTRAÇÃO MAPS - GMN HÍBRIDO PRO */}
+          {activeTab === 'maps' && (
+            <div className="space-y-6 animate-in fade-in duration-500 h-[calc(100vh-180px)] flex flex-col">
+              
+              {/* Top Controls Bar */}
+              <div className="flex items-center justify-between bg-capta-surface-low border border-white/5 p-4 backdrop-blur-md">
+                <div className="flex items-center gap-6">
+                   <div className="flex items-center gap-2">
+                     <div className="w-2 h-2 rounded-full bg-capta-primary animate-pulse"></div>
+                     <span className="text-[10px] font-space uppercase tracking-widest text-capta-primary font-bold">GMN Hybrid Engine v4.0</span>
+                   </div>
+                   <div className="h-4 w-[1px] bg-white/10"></div>
+                   <div className="flex items-center gap-4">
+                     <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Target Area:</span>
+                     <Input 
+                       value={filtrosMaps.location}
+                       onChange={(e) => setFiltrosMaps({...filtrosMaps, location: e.target.value})}
+                       placeholder="Ex: Rio de Janeiro, RJ"
+                       className="h-8 w-48 bg-black/20 border-white/5 text-[10px] font-space"
+                     />
+                   </div>
+                   <div className="flex items-center gap-4">
+                     <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Niche:</span>
+                     <Input 
+                       value={filtrosMaps.keyword}
+                       onChange={(e) => setFiltrosMaps({...filtrosMaps, keyword: e.target.value})}
+                       placeholder="Ex: Construtoras"
+                       className="h-8 w-48 bg-black/20 border-white/5 text-[10px] font-space"
+                     />
+                   </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button 
+                    onClick={clearGmnLeads}
+                    variant="ghost" 
+                    className="text-red-400 hover:bg-red-400/10 text-[9px] font-space uppercase tracking-widest h-9"
+                  >
+                    <Trash2 size={14} className="mr-2" /> Limpar Base
+                  </Button>
+                  
+                  {/* Bookmarklet Injetor */}
+                  <a 
+                    href={`javascript:(function(){const leads=[];const items=document.querySelectorAll('div[role="article"]');items.forEach(el=>{const name=el.querySelector('div.fontHeadlineSmall')?.innerText;const link=el.querySelector('a')?.href;if(name&&link){const text=el.innerText||"";const phone=text.match(/\\(?\\d{2}\\)?\\s?\\d{4,5}-?\\d{4}/)?.[0]||"";const rating=text.match(/(\\d\\.\\d)\\s\\(\\d+\\)/)?.[1]||"";const site=el.querySelector('a[aria-label*="website"], a[aria-label*="site"]')?.href||"";leads.push({name,link,phone,rating,site,address:text.split('\\n').find(l=>l.includes(',')&&/\\d/.test(l))||""});}});if(leads.length===0)return alert('Nenhum lead detectado. Certifique-se de rolar a lista lateral no Google Maps!');fetch('${BACKEND_URL}/api/gmn/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leads})}).then(r=>r.json()).then(d=>alert('🚀 '+d.message)).catch(e=>alert('❌ Erro: '+e.message));})();`}
+                    className="flex items-center gap-2 bg-capta-primary text-capta-bg px-6 py-2 rounded-none text-[10px] font-space font-bold uppercase tracking-widest hover:shadow-[0_0_20px_rgba(47,217,244,0.5)] transition-all cursor-move active:scale-95"
+                    title="Arraste para sua barra de favoritos"
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", e.target.href);
+                    }}
+                  >
+                    <Zap size={14} fill="currentColor" /> INJETOR GMN (Arraste p/ Favoritos)
+                  </a>
+                </div>
+              </div>
+
+              <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-hidden">
+                
+                {/* Google Maps Iframe Area */}
+                <div className="lg:col-span-8 bg-black/40 border border-white/5 relative overflow-hidden group">
+                  <div className="absolute inset-0 flex flex-col">
+                    <div className="p-2 bg-capta-surface-low/80 backdrop-blur-md border-b border-white/5 z-10 flex justify-between items-center">
+                      <span className="text-[8px] font-mono text-slate-500 uppercase flex items-center gap-2">
+                        <Globe size={10} className="animate-spin-slow" /> maps.google.com integrated_terminal
+                      </span>
+                      <div className="flex gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-red-500/50" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-yellow-500/50" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500/50" />
+                      </div>
+                    </div>
+                    <iframe 
+                      src={`https://www.google.com/maps?q=${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}&output=embed&authuser=0&hl=pt-BR`}
+                      className="flex-1 w-full border-none grayscale-[0.3] invert-[0.05] contrast-[1.1]"
+                      title="Google Maps Mining Area"
+                    />
+                    
+                    {/* Botão de Emergência para Abrir em Nova Aba */}
+                    <div className="absolute top-14 right-4 z-30">
+                      <Button 
+                        onClick={() => window.open(`https://www.google.com/maps/search/${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}`, '_blank')}
+                        className="bg-black/60 hover:bg-black/90 text-white border border-white/10 text-[8px] font-space uppercase h-8 px-3 backdrop-blur-md"
+                      >
+                        <ExternalLink size={10} className="mr-2" /> Abrir Maps (Nova Aba)
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {/* Tutorial Overlay (Auto-hide) */}
+                  <div className="absolute bottom-6 left-6 right-6 p-4 bg-capta-bg/90 border border-capta-primary/30 backdrop-blur-xl z-20 translate-y-0 group-hover:translate-y-full transition-transform duration-500">
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 bg-capta-primary/20 rounded-full">
+                        <Activity size={24} className="text-capta-primary" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-space font-bold uppercase tracking-widest">Como Minerar com o Injetor:</h4>
+                        <p className="text-[10px] text-slate-400 font-inter">
+                          1. Arraste o botão azul acima para sua <b>Barra de Favoritos</b>.<br/>
+                          2. Pesquise e <b>role a lista lateral</b> do Google Maps até o fim.<br/>
+                          3. Clique no favorito <b>"INJETOR GMN"</b> para enviar os dados para a IA.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Results Panel */}
+                <div className="lg:col-span-4 flex flex-col gap-6 overflow-hidden">
+                  
+                  {/* Dashboard Stats */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <Card className="bg-capta-surface-low border-white/5 p-4 rounded-none">
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest mb-1">Fila Global</div>
+                       <div className="text-2xl font-space font-bold text-capta-primary">{storedGmnLeads.length}</div>
+                    </Card>
+                    <Card className="bg-capta-surface-low border-white/5 p-4 rounded-none">
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest mb-1">Processando</div>
+                       <div className="text-2xl font-space font-bold text-white flex items-center gap-2">
+                         {isScanningMaps ? <Activity size={20} className="text-capta-primary animate-pulse" /> : '0'}
+                       </div>
+                    </Card>
+                  </div>
+
+                  {/* Terminal de Logs Compacto */}
+                  <div className="bg-black/60 border border-white/5 h-[200px] flex flex-col overflow-hidden font-mono text-[9px]">
+                    <div className="p-2 bg-white/5 border-b border-white/5 flex items-center justify-between">
+                       <span className="text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                         <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Terminal_Output
+                       </span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-hide">
+                       {mapsLogs.length === 0 ? (
+                         <div className="text-slate-700 italic">Pronto para receber injeção de dados...</div>
+                       ) : (
+                         mapsLogs.map((log, i) => (
+                           <div key={i} className={`flex gap-2 ${
+                             log.type === 'error' ? 'text-red-400' : 
+                             log.type === 'success' ? 'text-green-400' : 
+                             'text-slate-400'
+                           }`}>
+                             <span className="opacity-20">{new Date().toLocaleTimeString()}</span>
+                             <span className="truncate">{log.text}</span>
+                           </div>
+                         ))
+                       )}
+                       <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />
+                    </div>
+                  </div>
+
+                  {/* Tabela de Resultados Rápidos */}
+                  <div className="flex-1 bg-capta-surface-low/40 border border-white/5 overflow-hidden flex flex-col">
+                    <div className="p-3 bg-white/5 border-b border-white/5 text-[9px] font-space uppercase tracking-widest text-slate-400 flex justify-between">
+                      <span>Últimos Capturados</span>
+                      <span className="text-capta-primary">Live Sync</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                       {storedGmnLeads.length === 0 ? (
+                         <div className="h-full flex flex-col items-center justify-center opacity-20 gap-2 grayscale">
+                            <Database size={32} />
+                            <span className="text-[8px] font-space uppercase">Sem dados</span>
+                         </div>
+                       ) : (
+                         <table className="w-full text-left border-collapse">
+                            <tbody className="divide-y divide-white/5 font-space text-[10px]">
+                               {storedGmnLeads.slice(0, 50).map((lead, i) => (
+                                 <tr key={i} className="hover:bg-capta-primary/5 transition-colors group">
+                                   <td className="p-3">
+                                     <div className="font-bold text-white uppercase truncate w-48 group-hover:text-capta-primary transition-colors">{lead["Nome Empresa"]}</div>
+                                     <div className="text-[8px] text-slate-500 truncate w-48 italic">{lead["Site"] || 'Sem site'}</div>
+                                   </td>
+                                   <td className="p-3 text-right">
+                                      <Button 
+                                        onClick={() => moveToCRM(lead, 'Maps')}
+                                        className="h-7 w-7 p-0 bg-capta-primary/10 text-capta-primary border border-capta-primary/20 hover:bg-capta-primary hover:text-capta-bg transition-all"
+                                      >
+                                        <ArrowRight size={14} />
+                                      </Button>
+                                   </td>
+                                 </tr>
+                               ))}
+                            </tbody>
+                         </table>
+                       )}
+                    </div>
+                  </div>
+
+>>>>>>> 0366eaa (feat: implementado motor GMN Híbrido Pro e correções de layout)
                 </div>
               </div>
             </div>
