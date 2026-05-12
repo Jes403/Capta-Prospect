@@ -983,6 +983,9 @@ function AuthenticatedApp({ onLogout }) {
                       </Card>
                     ))}
                   </div>
+                </div>
+              )}
+
           {/* EXTRAÇÃO MAPS - PREMIUM ROBOT */}
           {activeTab === 'maps' && (
             <div className="space-y-6 animate-in fade-in duration-500 h-full flex flex-col">
