@@ -98,9 +98,9 @@ function AuthenticatedApp({ user, onLogout }) {
   const [draggedLeadId, setDraggedLeadId] = useState(null);
 
   // Convex Data
-  const leads = useQuery(api.leads.list) || [];
-  const createLead = useMutation(api.leads.create);
-  const updateLead = useMutation(api.leads.update);
+  const leads = useQuery(api.leads.getAll) || [];
+  const createLead = useMutation(api.leads.add);
+  const updateLead = useMutation(api.leads.updateStatus);
   const deleteLead = useMutation(api.leads.remove);
 
   const displayLeads = leads;
@@ -131,7 +131,6 @@ function AuthenticatedApp({ user, onLogout }) {
       await createLead({
         name: lead.name || lead["Nome Empresa"] || 'Lead Sem Nome',
         contact: lead.contact || lead["Telefone 1"] || '',
-        status: 'leads',
         origin: origin,
         site: lead.site || lead["Site"] || '',
         dono: lead.dono || '',
@@ -157,7 +156,7 @@ function AuthenticatedApp({ user, onLogout }) {
   const handleDrop = async (e, columnId) => {
     e.preventDefault();
     const id = e.dataTransfer.getData('leadId');
-    await updateLead({ id, updates: { status: columnId } });
+    await updateLead({ id, status: columnId });
   };
 
   const handleAddColumn = () => {
@@ -313,7 +312,7 @@ function AuthenticatedApp({ user, onLogout }) {
                           <div className="text-[10px] text-slate-500 mb-4">{lead.contact}</div>
                           <div className="flex justify-between items-center border-t border-white/5 pt-3">
                              <Button variant="ghost" size="sm" onClick={() => setEditingLead(lead)} className="h-6 text-[9px] uppercase font-bold text-capta-primary">View</Button>
-                             <select className="bg-transparent text-[9px] text-slate-500 outline-none" value={lead.status} onChange={(e) => updateLead({id: lead._id || lead.id, updates: {status: e.target.value}})}>
+                             <select className="bg-transparent text-[9px] text-slate-500 outline-none" value={lead.status} onChange={(e) => updateLead({id: lead._id || lead.id, status: e.target.value})}>
                                 {crmColumns.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                              </select>
                           </div>
@@ -366,7 +365,7 @@ function AuthenticatedApp({ user, onLogout }) {
                 </div>
                 <div className="mt-8 flex justify-end gap-3">
                    <Button onClick={() => setEditingLead(null)} variant="ghost">Cancelar</Button>
-                   <Button onClick={() => { updateLead({id: editingLead._id || editingLead.id, updates: editingLead}); setEditingLead(null); }} className="bg-capta-primary text-capta-bg font-bold">Salvar</Button>
+                   <Button onClick={() => { updateLead({id: editingLead._id || editingLead.id, status: editingLead.status}); setEditingLead(null); }} className="bg-capta-primary text-capta-bg font-bold">Salvar</Button>
                 </div>
               </Card>
             </div>
