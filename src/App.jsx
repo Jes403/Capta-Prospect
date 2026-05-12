@@ -63,21 +63,6 @@ function AuthenticatedApp({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isBackendOnline, setIsBackendOnline] = useState(false);
   
-  // Monitoramento do Backend
-  useEffect(() => {
-    const checkBackend = async () => {
-      try {
-        const response = await fetch(`${apiKeys.backend}/health`, { method: 'GET' }).catch(() => null);
-        setIsBackendOnline(response && response.ok);
-      } catch (err) {
-        setIsBackendOnline(false);
-      }
-    };
-    checkBackend();
-    const interval = setInterval(checkBackend, 10000); // Check a cada 10s
-    return () => clearInterval(interval);
-  }, [apiKeys.backend]);
-  
   // States para Receita
   const [filtrosReceita, setFiltrosReceita] = useState({ uf: 'SP', cidade: '', cnae: '', segmento: '', niche: '' });
   const [receitaResults, setReceitaResults] = useState([]);
@@ -99,6 +84,22 @@ function AuthenticatedApp({ user, onLogout }) {
   useEffect(() => {
     localStorage.setItem('capta_api_keys', JSON.stringify(apiKeys));
   }, [apiKeys]);
+
+  // Monitoramento do Backend
+  useEffect(() => {
+    const checkBackend = async () => {
+      if (!apiKeys.backend) return;
+      try {
+        const response = await fetch(`${apiKeys.backend}/health`, { method: 'GET' }).catch(() => null);
+        setIsBackendOnline(response && response.ok);
+      } catch (err) {
+        setIsBackendOnline(false);
+      }
+    };
+    checkBackend();
+    const interval = setInterval(checkBackend, 10000);
+    return () => clearInterval(interval);
+  }, [apiKeys.backend]);
 
   // CRM States
   const [crmColumns, setCrmColumns] = useState([
