@@ -1341,12 +1341,9 @@ function AuthenticatedApp({ onLogout }) {
                        )}
                     </div>
                   </div>
-
-                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* LINKEDIN REMOVED */}
 
