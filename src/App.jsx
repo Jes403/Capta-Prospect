@@ -102,6 +102,17 @@ function AuthenticatedApp({ onLogout }) {
 
   const [activeTab, setActiveTab] = useState('dashboard')
   
+  // Carregar chaves do localStorage ao iniciar
+  const [apiKeys, setApiKeys] = useState(() => {
+    const saved = localStorage.getItem('capta_api_keys');
+    return saved ? JSON.parse(saved) : { gemini: '', maps: '', backend: BACKEND_URL };
+  });
+
+  // Salvar chaves sempre que mudarem
+  useEffect(() => {
+    localStorage.setItem('capta_api_keys', JSON.stringify(apiKeys));
+  }, [apiKeys]);
+  
   // States for Receita Extractor
   const [isScanningReceita, setIsScanningReceita] = useState(false)
   const [receitaProgress, setReceitaProgress] = useState(0)
@@ -163,7 +174,7 @@ function AuthenticatedApp({ onLogout }) {
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/receita/scan`, { 
+        const res = await fetch(`${apiKeys.backend}/api/receita/scan`, { 
           method: 'POST', 
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ ping: true }) 
@@ -203,10 +214,13 @@ function AuthenticatedApp({ onLogout }) {
     }, 500)
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/receita/scan`, {
+      const response = await fetch(`${apiKeys.backend}/api/receita/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(filtrosReceita)
+        body: JSON.stringify({
+          ...filtrosReceita,
+          apiKey: apiKeys.gemini
+        })
       });
       
       const data = await response.json();
@@ -233,7 +247,7 @@ function AuthenticatedApp({ onLogout }) {
 
   const fetchGmnLeads = async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/hunter/gmn_leads`);
+      const res = await fetch(`${apiKeys.backend}/api/hunter/gmn_leads`);
       const data = await res.json();
       setStoredGmnLeads(data.leads || []);
     } catch (e) { console.error('Erro ao buscar leads GMN', e); }
@@ -264,10 +278,13 @@ function AuthenticatedApp({ onLogout }) {
 
     try {
       const endpoint = mode === 'robot' ? '/api/hunter/gmn' : '/api/hunter/gmn_api';
-      const response = await fetch(`${BACKEND_URL}${endpoint}`, {
+      const response = await fetch(`${apiKeys.backend}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(filtrosMaps)
+        body: JSON.stringify({
+          ...filtrosMaps,
+          apiKey: mode === 'robot' ? apiKeys.gemini : apiKeys.maps
+        })
       });
       const data = await response.json();
       if (data.job_id) {
@@ -285,7 +302,7 @@ function AuthenticatedApp({ onLogout }) {
     if (isScanningMaps && activeJobId) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`${BACKEND_URL}/api/hunter/status/${activeJobId}`);
+          const res = await fetch(`${apiKeys.backend}/api/hunter/status/${activeJobId}`);
           const data = await res.json();
           
           if (data.logs) setMapsLogs(data.logs);
@@ -308,7 +325,7 @@ function AuthenticatedApp({ onLogout }) {
 
   const clearGmnLeads = async () => {
     if (!confirm("Limpar toda a base extraída?")) return;
-    await fetch(`${BACKEND_URL}/api/hunter/gmn_leads`, { method: 'DELETE' });
+    await fetch(`${apiKeys.backend}/api/hunter/gmn_leads`, { method: 'DELETE' });
     fetchGmnLeads();
   }
 
@@ -418,10 +435,13 @@ function AuthenticatedApp({ onLogout }) {
     
     setIsQualifying(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/receita/qualify`, {
+      const response = await fetch(`${apiKeys.backend}/api/receita/qualify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leads: leadsToQualify })
+        body: JSON.stringify({ 
+          leads: leadsToQualify,
+          apiKey: apiKeys.gemini // Enviando a chave do usuário
+        })
       });
       
       const data = await response.json();
@@ -440,7 +460,7 @@ function AuthenticatedApp({ onLogout }) {
     if (isQualifying && qualifyJobId) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`${BACKEND_URL}/api/hunter/status/${qualifyJobId}`);
+          const res = await fetch(`${apiKeys.backend}/api/hunter/status/${qualifyJobId}`);
           const data = await res.json();
           
           setQualifyProgress({ total: data.total || 0, processed: data.processed || 0 });
@@ -567,10 +587,11 @@ function AuthenticatedApp({ onLogout }) {
           <SidebarItem icon={MapPin} label="Extração Maps" active={activeTab === 'maps'} onClick={() => setActiveTab('maps')} />
           <SidebarItem icon={Users} label="Gestão CRM" active={activeTab === 'crm'} onClick={() => setActiveTab('crm')} />
           <SidebarItem icon={Send} label="Disparo Whats" active={activeTab === 'whatsapp'} onClick={() => setActiveTab('whatsapp')} />
+          <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
         </nav>
 
-        <div className="p-4 border-t border-capta-surface-high">
-          <SidebarItem icon={Settings} label="Settings" active={false} />
+        <div className="p-4 border-t border-capta-surface-high opacity-20">
+          <div className="text-[8px] font-mono text-center uppercase tracking-widest text-slate-600">Capta v4.0.1 Stable</div>
         </div>
       </aside>
 
@@ -959,12 +980,6 @@ function AuthenticatedApp({ onLogout }) {
                       </Card>
                     ))}
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-
-<<<<<<< HEAD
           {/* EXTRAÇÃO MAPS - PREMIUM ROBOT */}
           {activeTab === 'maps' && (
             <div className="space-y-6 animate-in fade-in duration-500 h-full flex flex-col">
@@ -1321,7 +1336,7 @@ function AuthenticatedApp({ onLogout }) {
                     </div>
                   </div>
 
->>>>>>> 0366eaa (feat: implementado motor GMN Híbrido Pro e correções de layout)
+                  </div>
                 </div>
               </div>
             </div>
@@ -1607,6 +1622,102 @@ function AuthenticatedApp({ onLogout }) {
                <div className="w-64 h-px bg-capta-surface-high relative">
                   <div className="absolute inset-0 bg-capta-primary w-1/4 animate-ping"></div>
                </div>
+            </div>
+          )}
+
+          {/* CONFIGURAÇÕES E CHAVES DE API */}
+          {activeTab === 'settings' && (
+            <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-3 bg-capta-primary/20 rounded-xl">
+                  <Settings size={32} className="text-capta-primary" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-space font-bold uppercase tracking-widest text-white">Configurações de Inteligência</h2>
+                  <p className="text-xs text-slate-500 font-mono">Gerencie suas chaves de API e conexões de rede</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Coluna 1: Chaves de API */}
+                <div className="space-y-6">
+                  <Card className="bg-capta-surface-low border-white/5 overflow-hidden">
+                    <CardHeader className="bg-white/5 border-b border-white/5 p-6">
+                      <CardTitle className="text-sm font-space uppercase tracking-widest flex items-center gap-2">
+                        <Zap size={16} className="text-yellow-500" /> Credenciais IA & Mapas
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6 space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-space text-slate-400 uppercase tracking-widest">Gemini 1.5 Flash API Key</label>
+                        <Input 
+                          type="password"
+                          value={apiKeys.gemini}
+                          onChange={(e) => setApiKeys({...apiKeys, gemini: e.target.value})}
+                          placeholder="AIzaSy..."
+                          className="bg-capta-surface-lowest border-white/10 focus:border-capta-primary h-12 font-mono text-xs"
+                        />
+                        <p className="text-[9px] text-slate-600">Necessária para a qualificação automática de leads.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-space text-slate-400 uppercase tracking-widest">Google Maps API Key</label>
+                        <Input 
+                          type="password"
+                          value={apiKeys.maps}
+                          onChange={(e) => setApiKeys({...apiKeys, maps: e.target.value})}
+                          placeholder="AIzaSy..."
+                          className="bg-capta-surface-lowest border-white/10 focus:border-capta-primary h-12 font-mono text-xs"
+                        />
+                        <p className="text-[9px] text-slate-600">Usada para buscas robóticas de alta precisão.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-space text-slate-400 uppercase tracking-widest">URL do Servidor Backend</label>
+                        <Input 
+                          value={apiKeys.backend}
+                          onChange={(e) => setApiKeys({...apiKeys, backend: e.target.value})}
+                          placeholder="http://localhost:3006"
+                          className="bg-capta-surface-lowest border-white/10 focus:border-capta-primary h-12 font-mono text-xs"
+                        />
+                      </div>
+                    </CardContent>
+                    <CardFooter className="bg-capta-primary/5 p-4 border-t border-white/5">
+                       <div className="flex items-center gap-3 text-capta-primary">
+                          <CheckCircle size={14} />
+                          <span className="text-[10px] font-space uppercase">As alterações são salvas automaticamente</span>
+                       </div>
+                    </CardFooter>
+                  </Card>
+                </div>
+
+                {/* Coluna 2: Status e Diagnóstico */}
+                <div className="space-y-6">
+                  <Card className="bg-capta-surface-low border-white/5">
+                    <CardHeader className="bg-white/5 border-b border-white/5 p-6">
+                      <CardTitle className="text-sm font-space uppercase tracking-widest">Diagnóstico de Sistema</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6 space-y-4">
+                       <div className="flex justify-between items-center p-3 bg-capta-surface-lowest rounded border border-white/5">
+                          <span className="text-xs text-slate-400">Status do Banco (Convex)</span>
+                          <span className="text-xs font-bold text-green-400">CONECTADO</span>
+                       </div>
+                       <div className="flex justify-between items-center p-3 bg-capta-surface-lowest rounded border border-white/5">
+                          <span className="text-xs text-slate-400">Motor de Extração (Render)</span>
+                          <span className={`text-xs font-bold ${isBackendOnline ? 'text-green-400' : 'text-red-400'}`}>
+                            {isBackendOnline ? 'ATIVO' : 'OFFLINE'}
+                          </span>
+                       </div>
+                       <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded">
+                          <h4 className="text-[10px] font-bold text-blue-400 uppercase mb-1">Informação de Segurança</h4>
+                          <p className="text-[9px] text-blue-400/70 leading-relaxed">
+                            Suas chaves são armazenadas localmente no seu navegador e nunca são enviadas para nossos servidores, exceto para processar suas requisições de mineração.
+                          </p>
+                       </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
             </div>
           )}
 

@@ -7,8 +7,12 @@ const TURSO_URL = "libsql://capta-jes403.aws-us-east-1.turso.io";
 const TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzgzODc4MTMsImlkIjoiMDE5ZTEwMjctNjMwMS03NWIxLWExMDMtMzA5M2QwMWQyZDExIiwicmlkIjoiNjdmNjBmNDUtYmQ3ZC00NDQxLTk4NDMtM2UwOTViMmJiMWNhIn0.SqtELBXXp53hhCOwxDQ72llcRRSGYyMGSGOoWBt6OpY-DFWz3wOkO7ciWYdVH9iu57sKVMND1Ih7_lit2uEaDg";
 
 async function migrate() {
-    console.log("🔍 Abrindo banco de dados local...");
-    const localDb = new Database(SQLITE_PATH);
+    const args = process.argv.slice(2);
+    const startArg = args.find(a => a.startsWith('--start='));
+    const initialOffset = startArg ? parseInt(startArg.split('=')[1]) : 0;
+
+    console.log("🔍 Abrindo banco de dados local (Modo Seguro)...");
+    const localDb = new Database(SQLITE_PATH, { readonly: true, timeout: 10000 });
     const turso = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
 
     try {
@@ -19,48 +23,76 @@ async function migrate() {
         
         console.log(`✅ Colunas detectadas (${colCount}): ${colNames.join(', ')}`);
 
-        // LIMPEZA: Vamos deletar a tabela antiga no Turso para recriar com as colunas certas
-        console.log("🗑️ Removendo tabela antiga no Turso para evitar conflito...");
-        try {
-            await turso.execute("DROP TABLE IF EXISTS estabelecimentos");
-        } catch (e) {
-            console.log("⚠️ Nota: Tabela não existia ou já foi removida.");
+        if (initialOffset === 0) {
+            console.log("🗑️ Removendo tabela antiga no Turso para iniciar do zero...");
+            try { await turso.execute("DROP TABLE IF EXISTS estabelecimentos"); } catch (e) {}
+
+            console.log("📁 Criando nova tabela no Turso...");
+            const createTableSql = `CREATE TABLE estabelecimentos (${colNames.map(name => `${name} TEXT`).join(', ')}, PRIMARY KEY(${colNames[0]}))`;
+            await turso.execute(createTableSql);
         }
 
-        console.log("📁 Criando nova tabela correta no Turso...");
-        const createTableSql = `CREATE TABLE estabelecimentos (${colNames.map(name => `${name} TEXT`).join(', ')}, PRIMARY KEY(${colNames[0]}))`;
-        await turso.execute(createTableSql);
+        const count = 11448620;
+        const CHUNK_SIZE = 1000; 
+        const PARALLEL_BATCHES = 10; 
+        const TOTAL_STEP_SIZE = CHUNK_SIZE * PARALLEL_BATCHES;
+        let offset = initialOffset;
+        let lastId = null;
 
-        const count = localDb.prepare("SELECT count(*) as total FROM estabelecimentos").get().total;
-        console.log(`📊 Total: ${count} registros.`);
+        if (initialOffset > 0) {
+            console.log(`🔍 Localizando ID de partida no registro ${initialOffset} (Isso pode levar 1 min)...`);
+            const startRow = localDb.prepare("SELECT id FROM estabelecimentos LIMIT 1 OFFSET ?").get(initialOffset);
+            if (startRow) lastId = startRow.id;
+        }
 
-        const CHUNK_SIZE = 100; 
-        let offset = 0;
-        
         const placeholders = new Array(colCount).fill('?').join(',');
         const insertSql = `INSERT OR REPLACE INTO estabelecimentos (${colNames.join(',')}) VALUES (${placeholders})`;
 
-        console.log("🚀 Iniciando migração pesada...");
+        console.log("🚀 Iniciando transferência (MODO BUSCA DIRETA ATIVADO)...");
+        const startTime = Date.now();
 
         while (true) {
-            const rows = localDb.prepare("SELECT * FROM estabelecimentos LIMIT ? OFFSET ?").all(CHUNK_SIZE, offset);
-            if (rows.length === 0) break;
-
-            const queries = rows.map(row => ({
-                sql: insertSql,
-                args: Object.values(row)
-            }));
-
-            await turso.batch(queries);
+            let allRows;
+            if (lastId === null) {
+                allRows = localDb.prepare("SELECT * FROM estabelecimentos ORDER BY id ASC LIMIT ?").all(TOTAL_STEP_SIZE);
+            } else {
+                allRows = localDb.prepare("SELECT * FROM estabelecimentos WHERE id > ? ORDER BY id ASC LIMIT ?").all(lastId, TOTAL_STEP_SIZE);
+            }
             
-            offset += rows.length;
-            const percent = ((offset / count) * 100).toFixed(4);
-            console.log(`📦 Enviados: ${offset} / ${count} (${percent}%)`);
+            if (allRows.length === 0) break;
+
+            const batchPromises = [];
+            for (let i = 0; i < allRows.length; i += CHUNK_SIZE) {
+                const chunk = allRows.slice(i, i + CHUNK_SIZE);
+                const queries = chunk.map(row => ({
+                    sql: insertSql,
+                    args: Object.values(row)
+                }));
+                batchPromises.push(turso.batch(queries).then(() => chunk.length));
+            }
+
+            const results = await Promise.all(batchPromises);
+            const totalInThisStep = results.reduce((a, b) => a + b, 0);
+            
+            offset += totalInThisStep;
+            lastId = allRows[allRows.length - 1].id; 
+            
+            const percent = ((offset / count) * 100).toFixed(2);
+            const elapsed = (Date.now() - startTime) / 1000;
+            const speed = (offset - initialOffset) / elapsed; 
+            
+            const barLength = 20;
+            const completedBars = Math.floor((offset / count) * barLength);
+            const progressBar = "█".repeat(completedBars) + "░".repeat(barLength - completedBars);
+
+            process.stdout.write(`\r⚡ [${progressBar}] ${percent}% | 📦 ${offset.toLocaleString()} / ${count.toLocaleString()} | 🚀 ${speed.toFixed(0)} reg/s`);
+
+            if (allRows.length < TOTAL_STEP_SIZE) break;
         }
 
-        console.log("✨ TUDO PRONTO!");
+        console.log("\n\n✨ MIGRAÇÃO CONCLUÍDA COM SUCESSO!");
     } catch (err) {
-        console.error("❌ ERRO:", err.message);
+        console.error("\n❌ ERRO:", err.message);
     }
 }
 

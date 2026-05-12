@@ -77,7 +77,7 @@ function saveGmnLeads() {
   fs.writeFileSync(GMN_LEADS_FILE, JSON.stringify(GMN_LEADS_STORE, null, 2));
 }
 
-async function askGemini(siteText, rules, url, retries = 5) {
+async function askGemini(siteText, rules, url, retries = 5, apiKey = null) {
   const prompt = `Você é um Analista de Qualificação de Leads experiente. Sua missão é analisar o site: ${url}
   TEXTO E LINKS DO SITE (RESUMO):
   ${siteText.substring(0, 10000)}
@@ -95,7 +95,8 @@ async function askGemini(siteText, rules, url, retries = 5) {
   
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      const activeKey = apiKey || GEMINI_API_KEY; // Usa a do usuário ou a padrão
+      const response = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`, {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { response_mime_type: "application/json", temperature: 0.1 }
       }, { timeout: 30000 });
@@ -243,7 +244,7 @@ async function mineCasaDosDados(filters) {
  * MOTOR DE QUALIFICAÇÃO OFICIAL (CAPTA)
  * Segue as regras do instrucoes.txt: Status Site, Nome Comercial (<title>), Instagram e Maps.
  */
-async function qualifyLead(lead, job) {
+async function qualifyLead(lead, job, apiKey = null) {
   let site = lead.site || lead["Site"] || "";
   let instagram = lead.instagram || lead["Instagram"] || "";
   let email = lead.email || lead["E-mail"] || "";
@@ -306,7 +307,7 @@ async function qualifyLead(lead, job) {
 
         if (!instagram || !email) {
           const bodyText = $('body').text().replace(/\s+/g, ' ').substring(0, 5000);
-          const aiRes = await askGemini(bodyText, "Extraia Instagram e E-mail comercial para prospecção", url, 1);
+          const aiRes = await askGemini(bodyText, "Extraia Instagram e E-mail comercial para prospecção", url, 1, apiKey);
           if (aiRes) {
             if (!instagram) instagram = aiRes.Instagram || "";
             if (!email) email = aiRes["E-mail"] || "";
@@ -583,7 +584,7 @@ app.post('/api/hunter/gmn_api', async (req, res) => {
 
 // --- NOVO MOTOR DE INJEÇÃO (BOOKMARKLET) ---
 app.post('/api/gmn/inject', async (req, res) => {
-  const { leads } = req.body;
+  const { leads, apiKey } = req.body;
   if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: "Leads array required" });
 
   const jobId = `inject_${Date.now()}`;
@@ -610,7 +611,7 @@ app.post('/api/gmn/inject', async (req, res) => {
           origin: 'Maps (Injetor)'
         };
 
-        const enriched = await qualifyLead(leadBase, job);
+        const enriched = await qualifyLead(leadBase, job, apiKey);
         
         // Evitar duplicatas na store global
         const exists = GMN_LEADS_STORE.leads.some(l => l["Google Maps"] === enriched["Google Maps"]);
