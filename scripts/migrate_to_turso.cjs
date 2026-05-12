@@ -9,7 +9,10 @@ const TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOj
 async function migrate() {
     const args = process.argv.slice(2);
     const startArg = args.find(a => a.startsWith('--start='));
+    const limitArg = args.find(a => a.startsWith('--limit='));
     const initialOffset = startArg ? parseInt(startArg.split('=')[1]) : 0;
+    const maxRecords = limitArg ? parseInt(limitArg.split('=')[1]) : Infinity;
+    let recordsMigrated = 0;
 
     console.log("🔍 Abrindo banco local...");
     const localDb = new Database(SQLITE_PATH, { readonly: true, timeout: 15000 });
@@ -21,8 +24,8 @@ async function migrate() {
         const colCount = colNames.length;
         
         const count = 11448620;
-        const CHUNK_SIZE = 1000; 
-        const PARALLEL_BATCHES = 5; // Reduzi um pouco para evitar "fetch failed"
+        const CHUNK_SIZE = 200; // Reduzido drasticamente para estabilidade
+        const PARALLEL_BATCHES = 2; // Menos conexões simultâneas
         const TOTAL_STEP_SIZE = CHUNK_SIZE * PARALLEL_BATCHES;
         let offset = initialOffset;
         let lastId = null;
@@ -49,11 +52,11 @@ async function migrate() {
             
             if (allRows.length === 0) break;
 
-            // Lógica de tentativa (Retry) para evitar "fetch failed"
+            // Lógica de tentativa (Retry) para evitar "fetch failed" - MODO INFINITO PARA A MADRUGADA
             let success = false;
-            let retries = 3;
+            let retryAttempt = 0;
 
-            while (!success && retries > 0) {
+            while (!success) {
                 try {
                     const batchPromises = [];
                     for (let i = 0; i < allRows.length; i += CHUNK_SIZE) {
@@ -67,15 +70,14 @@ async function migrate() {
                     await Promise.all(batchPromises);
                     success = true;
                 } catch (e) {
-                    retries--;
-                    console.log(`\n⚠️ Oscilação de rede detectada. Tentando novamente em 2s... (${retries} restantes)`);
-                    await new Promise(r => setTimeout(r, 2000));
+                    retryAttempt++;
+                    process.stdout.write(`\n⚠️ Alerta de Rede: ${e.message} (#${retryAttempt}). Reconectando em 5s...`);
+                    await new Promise(r => setTimeout(r, 5000));
                 }
             }
 
-            if (!success) throw new Error("Falha persistente na conexão com o Turso.");
-
             offset += allRows.length;
+            recordsMigrated += allRows.length;
             lastId = allRows[allRows.length - 1].id; 
             
             const percent = ((offset / count) * 100).toFixed(2);
@@ -87,6 +89,11 @@ async function migrate() {
             const progressBar = "█".repeat(completedBars) + "░".repeat(barLength - completedBars);
 
             process.stdout.write(`\r⚡ [${progressBar}] ${percent}% | 📦 ${offset.toLocaleString()} / ${count.toLocaleString()} | 🚀 ${speed.toFixed(0)} reg/s`);
+
+            if (recordsMigrated >= maxRecords) {
+                console.log(`\n\n🛑 Limite de ${maxRecords} registros atingido. Parando para testes.`);
+                break;
+            }
 
             if (allRows.length < TOTAL_STEP_SIZE) break;
         }

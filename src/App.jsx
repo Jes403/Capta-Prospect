@@ -228,18 +228,104 @@ function AuthenticatedApp({ user, onLogout }) {
           {/* EXTRATOR RECEITA */}
           {activeTab === 'receita' && (
             <div className="space-y-6 animate-in fade-in duration-500">
-              <Card className="bg-capta-surface-low/50 border-white/5 p-8">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                  <Input value={filtrosReceita.uf} onChange={(e) => setFiltrosReceita({...filtrosReceita, uf: e.target.value})} placeholder="UF" />
-                  <Input value={filtrosReceita.cidade} onChange={(e) => setFiltrosReceita({...filtrosReceita, cidade: e.target.value})} placeholder="Cidade" />
-                  <Input value={filtrosReceita.cnae} onChange={(e) => setFiltrosReceita({...filtrosReceita, cnae: e.target.value})} placeholder="CNAE" />
-                  <Input value={filtrosReceita.segmento} onChange={(e) => setFiltrosReceita({...filtrosReceita, segmento: e.target.value})} placeholder="Palavra-chave" />
-                </div>
-                <div className="mt-8 flex justify-end gap-4">
-                  <Button onClick={handleStartReceitaScan} disabled={isScanningReceita} className="bg-capta-primary text-capta-bg font-bold h-11 px-8">
-                    {isScanningReceita ? 'Extraindo...' : 'Executar Extração'}
-                  </Button>
-                </div>
+              <Card className="bg-capta-surface-low/50 border-white/5 backdrop-blur-md overflow-hidden">
+                <CardHeader className="border-b border-white/5 bg-white/[0.02] px-8 py-6">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <CardTitle className="text-sm font-space uppercase tracking-[0.3em] flex items-center gap-3 text-capta-primary">
+                        <Database size={18} /> Deep Data Mining
+                      </CardTitle>
+                      <CardDescription className="text-xs text-slate-500 font-mono">
+                        Inteligência Artificial aplicada à base da Receita Federal
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                
+                <CardContent className="p-8">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Estado (UF)</label>
+                      <select 
+                        value={filtrosReceita.uf}
+                        onChange={(e) => setFiltrosReceita({...filtrosReceita, uf: e.target.value})}
+                        className="w-full h-11 bg-capta-surface-lowest border border-white/5 px-4 text-sm font-space text-white focus:border-capta-primary outline-none transition-all"
+                      >
+                        <option value="SP">São Paulo (SP)</option>
+                        <option value="RJ">Rio de Janeiro (RJ)</option>
+                        <option value="MG">Minas Gerais (MG)</option>
+                        <option value="PR">Paraná (PR)</option>
+                        <option value="SC">Santa Catarina (SC)</option>
+                        <option value="RS">Rio Grande do Sul (RS)</option>
+                        <option value="BA">Bahia (BA)</option>
+                      </select>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Cidade Alvo</label>
+                      <Input value={filtrosReceita.cidade} onChange={(e) => setFiltrosReceita({...filtrosReceita, cidade: e.target.value})} placeholder="Ex: Rio de Janeiro" className="h-11 bg-capta-surface-lowest border-white/5" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">CNAE Específico</label>
+                      <Input value={filtrosReceita.cnae} onChange={(e) => setFiltrosReceita({...filtrosReceita, cnae: e.target.value})} placeholder="Ex: 4741500" className="h-11 bg-capta-surface-lowest border-white/5" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Palavra-Chave</label>
+                      <Input value={filtrosReceita.segmento} onChange={(e) => setFiltrosReceita({...filtrosReceita, segmento: e.target.value})} placeholder="Ex: PADARIA, CONSTRUTORA" className="h-11 bg-capta-surface-lowest border-white/5" />
+                    </div>
+                  </div>
+
+                  {/* Seletor de Nicho Estratégico */}
+                  <div className="mt-6 p-4 bg-capta-primary/5 border border-capta-primary/20 flex flex-wrap items-center gap-4">
+                    <div className="text-[10px] font-space text-capta-primary uppercase tracking-[0.2em] w-full mb-2">🎯 Inteligência de Nicho (Estratégia NSTI)</div>
+                    {[
+                      { id: '', label: 'TODOS OS SETORES' },
+                      { id: 'SAUDE', label: 'SAÚDE / CLÍNICAS' },
+                      { id: 'EDUCACAO', label: 'EDUCAÇÃO / ESCOLAS' },
+                      { id: 'ESCRITORIOS', label: 'ESCRITÓRIOS (CONTAB/ADV)' },
+                      { id: 'ENGENHARIA', label: 'ENGENHARIA / ARQ' },
+                    ].map(n => (
+                      <button
+                        key={n.id}
+                        onClick={() => setFiltrosReceita({...filtrosReceita, niche: n.id})}
+                        className={`px-4 py-2 text-[10px] font-space uppercase tracking-wider transition-all duration-200 border ${
+                          filtrosReceita.niche === n.id 
+                            ? 'bg-capta-primary text-capta-bg border-capta-primary' 
+                            : 'border-capta-surface-high text-slate-400 hover:border-capta-primary/50'
+                        }`}
+                      >
+                        {n.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-8 flex justify-end gap-4 items-center">
+                    {isScanningReceita && (
+                      <div className="flex-1 mr-6">
+                        <div className="flex justify-between text-[10px] font-space mb-2 text-capta-primary tracking-widest uppercase">
+                          <span>Scanning Quantum Database...</span>
+                          <span>{receitaProgress}%</span>
+                        </div>
+                        <div className="h-1 bg-white/5 w-full rounded-full overflow-hidden">
+                          <div className="h-full bg-capta-primary shadow-[0_0_10px_#2fd9f4]" style={{ width: `${receitaProgress}%` }}></div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <Button 
+                      onClick={handleStartReceitaScan}
+                      disabled={isScanningReceita}
+                      size="lg"
+                      className={`min-w-[200px] font-space font-bold uppercase tracking-[0.2em] text-[10px] ${
+                        isScanningReceita ? 'bg-slate-800 text-slate-500' : 'bg-capta-primary text-capta-bg hover:shadow-[0_0_20px_rgba(47,217,244,0.4)]'
+                      }`}
+                    >
+                      {isScanningReceita ? 'Infiltrating...' : 'Execute Extraction'}
+                    </Button>
+                  </div>
+                </CardContent>
               </Card>
 
               {receitaResults.length > 0 && (
@@ -255,23 +341,71 @@ function AuthenticatedApp({ user, onLogout }) {
             </div>
           )}
 
-          {/* EXTRAÇÃO MAPS */}
+          {/* EXTRAÇÃO MAPS - GMN HÍBRIDO PRO */}
           {activeTab === 'maps' && (
             <div className="space-y-6 animate-in fade-in duration-500 h-[calc(100vh-180px)] flex flex-col">
-              <div className="flex items-center justify-between bg-capta-surface-low border border-white/5 p-4">
+              <div className="flex items-center justify-between bg-capta-surface-low border border-white/5 p-4 backdrop-blur-md">
                 <div className="flex items-center gap-6">
-                   <Input value={filtrosMaps.location} onChange={(e) => setFiltrosMaps({...filtrosMaps, location: e.target.value})} placeholder="Localização" className="h-8 w-48 bg-black/20" />
-                   <Input value={filtrosMaps.keyword} onChange={(e) => setFiltrosMaps({...filtrosMaps, keyword: e.target.value})} placeholder="Nicho" className="h-8 w-48 bg-black/20" />
+                   <div className="flex items-center gap-2">
+                     <div className="w-2 h-2 rounded-full bg-capta-primary animate-pulse"></div>
+                     <span className="text-[10px] font-space uppercase tracking-widest text-capta-primary font-bold">GMN Hybrid Engine v4.0</span>
+                   </div>
+                   <div className="h-4 w-[1px] bg-white/10"></div>
+                   <Input value={filtrosMaps.location} onChange={(e) => setFiltrosMaps({...filtrosMaps, location: e.target.value})} placeholder="Localização" className="h-9 w-48 bg-black/20 border-white/5 font-space text-[11px]" />
+                   <Input value={filtrosMaps.keyword} onChange={(e) => setFiltrosMaps({...filtrosMaps, keyword: e.target.value})} placeholder="Nicho/Keyword" className="h-9 w-48 bg-black/20 border-white/5 font-space text-[11px]" />
                 </div>
                 <div className="flex gap-3">
-                   <Button onClick={() => window.open(`https://www.google.com/maps`, '_blank')} className="bg-capta-primary text-capta-bg text-[10px] font-bold">Abrir Google Maps</Button>
+                   <Button onClick={() => handleStartMapsScan('Cloud')} disabled={isScanningMaps} className="bg-capta-primary/10 text-capta-primary border border-capta-primary/20 text-[9px] font-space font-bold uppercase px-4 h-9">
+                      Cloud Mining
+                   </Button>
+                   <Button onClick={() => handleStartMapsScan('Local')} disabled={isScanningMaps} className="bg-capta-primary text-capta-bg text-[9px] font-space font-bold uppercase px-4 h-9">
+                      Local Injector
+                   </Button>
                 </div>
               </div>
-              <div className="flex-1 bg-black/40 border border-white/5">
-                <iframe 
-                  src={`https://www.google.com/maps?q=${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}&output=embed`}
-                  className="w-full h-full border-none grayscale-[0.3]"
-                />
+
+              <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-0">
+                <div className="lg:col-span-2 bg-black/40 border border-white/5 relative group">
+                  <iframe 
+                    src={`https://www.google.com/maps?q=${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}&output=embed`}
+                    className="w-full h-full border-none grayscale-[0.3] opacity-60 group-hover:opacity-100 transition-opacity"
+                  />
+                  <div className="absolute top-4 left-4 p-3 bg-capta-bg/90 border border-capta-primary/30 backdrop-blur-md">
+                    <div className="text-[10px] font-mono text-capta-primary flex items-center gap-2">
+                      <Activity size={12} className="animate-pulse" />
+                      COORD_STREAM: ACTIVE
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-capta-surface-low/50 border border-white/5 flex flex-col font-mono text-[10px] overflow-hidden">
+                  <div className="p-3 border-b border-white/5 bg-white/5 font-space uppercase tracking-widest text-slate-400">
+                    Console de Mineração
+                  </div>
+                  <div className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar bg-black/20">
+                    {mapsLogs.length === 0 ? (
+                      <div className="text-slate-700 italic">Aguardando comando de inicialização...</div>
+                    ) : (
+                      mapsLogs.map((log, i) => (
+                        <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-capta-primary/70'}`}>
+                          <span className="opacity-30">[{new Date().toLocaleTimeString()}]</span>
+                          <span>{log.text}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {isScanningMaps && (
+                    <div className="p-4 border-t border-white/5 bg-capta-primary/5">
+                      <div className="flex justify-between mb-2">
+                        <span className="text-capta-primary uppercase">Progresso</span>
+                        <span>{mapsProgress.processed} / {mapsProgress.total}</span>
+                      </div>
+                      <div className="h-1 bg-white/5 w-full">
+                        <div className="h-full bg-capta-primary" style={{ width: `${(mapsProgress.processed / mapsProgress.total) * 100 || 0}%` }}></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
