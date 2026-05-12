@@ -11,36 +11,24 @@ async function migrate() {
     const startArg = args.find(a => a.startsWith('--start='));
     const initialOffset = startArg ? parseInt(startArg.split('=')[1]) : 0;
 
-    console.log("🔍 Abrindo banco de dados local (Modo Seguro)...");
-    const localDb = new Database(SQLITE_PATH, { readonly: true, timeout: 10000 });
+    console.log("🔍 Abrindo banco local...");
+    const localDb = new Database(SQLITE_PATH, { readonly: true, timeout: 15000 });
     const turso = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
 
     try {
-        console.log("🕵️ Detectando estrutura das colunas...");
         const columnsInfo = localDb.prepare("PRAGMA table_info(estabelecimentos)").all();
         const colNames = columnsInfo.map(c => c.name);
         const colCount = colNames.length;
         
-        console.log(`✅ Colunas detectadas (${colCount}): ${colNames.join(', ')}`);
-
-        if (initialOffset === 0) {
-            console.log("🗑️ Removendo tabela antiga no Turso para iniciar do zero...");
-            try { await turso.execute("DROP TABLE IF EXISTS estabelecimentos"); } catch (e) {}
-
-            console.log("📁 Criando nova tabela no Turso...");
-            const createTableSql = `CREATE TABLE estabelecimentos (${colNames.map(name => `${name} TEXT`).join(', ')}, PRIMARY KEY(${colNames[0]}))`;
-            await turso.execute(createTableSql);
-        }
-
         const count = 11448620;
         const CHUNK_SIZE = 1000; 
-        const PARALLEL_BATCHES = 10; 
+        const PARALLEL_BATCHES = 5; // Reduzi um pouco para evitar "fetch failed"
         const TOTAL_STEP_SIZE = CHUNK_SIZE * PARALLEL_BATCHES;
         let offset = initialOffset;
         let lastId = null;
 
         if (initialOffset > 0) {
-            console.log(`🔍 Localizando ID de partida no registro ${initialOffset} (Isso pode levar 1 min)...`);
+            console.log(`⏩ Localizando ponto de retomada: ${initialOffset}...`);
             const startRow = localDb.prepare("SELECT id FROM estabelecimentos LIMIT 1 OFFSET ?").get(initialOffset);
             if (startRow) lastId = startRow.id;
         }
@@ -48,7 +36,7 @@ async function migrate() {
         const placeholders = new Array(colCount).fill('?').join(',');
         const insertSql = `INSERT OR REPLACE INTO estabelecimentos (${colNames.join(',')}) VALUES (${placeholders})`;
 
-        console.log("🚀 Iniciando transferência (MODO BUSCA DIRETA ATIVADO)...");
+        console.log("🚀 Iniciando transferência (MODO RESILIENTE ATIVADO)...");
         const startTime = Date.now();
 
         while (true) {
@@ -61,20 +49,33 @@ async function migrate() {
             
             if (allRows.length === 0) break;
 
-            const batchPromises = [];
-            for (let i = 0; i < allRows.length; i += CHUNK_SIZE) {
-                const chunk = allRows.slice(i, i + CHUNK_SIZE);
-                const queries = chunk.map(row => ({
-                    sql: insertSql,
-                    args: Object.values(row)
-                }));
-                batchPromises.push(turso.batch(queries).then(() => chunk.length));
+            // Lógica de tentativa (Retry) para evitar "fetch failed"
+            let success = false;
+            let retries = 3;
+
+            while (!success && retries > 0) {
+                try {
+                    const batchPromises = [];
+                    for (let i = 0; i < allRows.length; i += CHUNK_SIZE) {
+                        const chunk = allRows.slice(i, i + CHUNK_SIZE);
+                        const queries = chunk.map(row => ({
+                            sql: insertSql,
+                            args: Object.values(row)
+                        }));
+                        batchPromises.push(turso.batch(queries));
+                    }
+                    await Promise.all(batchPromises);
+                    success = true;
+                } catch (e) {
+                    retries--;
+                    console.log(`\n⚠️ Oscilação de rede detectada. Tentando novamente em 2s... (${retries} restantes)`);
+                    await new Promise(r => setTimeout(r, 2000));
+                }
             }
 
-            const results = await Promise.all(batchPromises);
-            const totalInThisStep = results.reduce((a, b) => a + b, 0);
-            
-            offset += totalInThisStep;
+            if (!success) throw new Error("Falha persistente na conexão com o Turso.");
+
+            offset += allRows.length;
             lastId = allRows[allRows.length - 1].id; 
             
             const percent = ((offset / count) * 100).toFixed(2);
@@ -90,9 +91,9 @@ async function migrate() {
             if (allRows.length < TOTAL_STEP_SIZE) break;
         }
 
-        console.log("\n\n✨ MIGRAÇÃO CONCLUÍDA COM SUCESSO!");
+        console.log("\n\n✨ MIGRAÇÃO CONCLUÍDA!");
     } catch (err) {
-        console.error("\n❌ ERRO:", err.message);
+        console.error("\n❌ ERRO FATAL:", err.message);
     }
 }
 

@@ -33,7 +33,10 @@ import {
   Mail,
   Filter,
   LineChart,
-  Camera
+  Camera,
+  Instagram,
+  Linkedin,
+  Twitter
 } from 'lucide-react'
 
 import { Button } from "@/components/ui/button"
