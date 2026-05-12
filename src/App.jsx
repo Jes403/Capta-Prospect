@@ -63,6 +63,21 @@ function AuthenticatedApp({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isBackendOnline, setIsBackendOnline] = useState(false);
   
+  // Monitoramento do Backend
+  useEffect(() => {
+    const checkBackend = async () => {
+      try {
+        const response = await fetch(`${apiKeys.backend}/health`, { method: 'GET' }).catch(() => null);
+        setIsBackendOnline(response && response.ok);
+      } catch (err) {
+        setIsBackendOnline(false);
+      }
+    };
+    checkBackend();
+    const interval = setInterval(checkBackend, 10000); // Check a cada 10s
+    return () => clearInterval(interval);
+  }, [apiKeys.backend]);
+  
   // States para Receita
   const [filtrosReceita, setFiltrosReceita] = useState({ uf: 'SP', cidade: '', cnae: '', segmento: '', niche: '' });
   const [receitaResults, setReceitaResults] = useState([]);
@@ -479,6 +494,10 @@ function AuthenticatedApp({ user, onLogout }) {
                   <div className="space-y-2">
                     <label className="text-[10px] font-space text-slate-400 uppercase">Google Maps API Key</label>
                     <Input type="password" value={apiKeys.maps} onChange={(e) => setApiKeys({...apiKeys, maps: e.target.value})} className="bg-capta-surface-lowest border-white/10 h-11" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-space text-slate-400 uppercase">URL do Servidor Backend</label>
+                    <Input value={apiKeys.backend} onChange={(e) => setApiKeys({...apiKeys, backend: e.target.value})} placeholder="https://seu-backend.onrender.com" className="bg-capta-surface-lowest border-white/10 h-11" />
                   </div>
                 </Card>
               </div>
