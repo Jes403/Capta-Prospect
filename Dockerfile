@@ -57,7 +57,7 @@ RUN mkdir -p data
 COPY . .
 
 # Expor a porta que o Render vai usar
-EXPOSE 3006
+EXPOSE 3007
 
 # Comando para iniciar o servidor
 CMD ["npm", "run", "server"]

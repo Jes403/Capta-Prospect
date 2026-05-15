@@ -4,7 +4,8 @@ import {
   Search, Zap, Plus, Edit, Trash2, Database, Activity, 
   ArrowRight, CheckCircle, ExternalLink, Globe, LogOut, 
   Mail, Phone, Instagram, Linkedin, Twitter, MoreVertical, 
-  X, Camera, GripVertical, Filter, Download, AlertCircle, Save
+  X, Camera, GripVertical, Filter, Download, AlertCircle, Save,
+  Send, Star, Shield, Paperclip
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 
-const BACKEND_URL = 'http://localhost:3006';
+const API_BASE = 'http://localhost:3007';
 
 function LoginForm({ onLogin }) {
   const [user, setUser] = useState({ username: '', password: '' });
@@ -62,10 +63,13 @@ function LoginForm({ onLogin }) {
 function AuthenticatedApp({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isBackendOnline, setIsBackendOnline] = useState(false);
+  const [serverStats, setServerStats] = useState({ latency: 0, dbCount: 0, uptime: 0 });
   
   // States para Receita
-  const [filtrosReceita, setFiltrosReceita] = useState({ uf: 'SP', cidade: '', cnae: '', segmento: '', niche: '' });
+  const [filtrosReceita, setFiltrosReceita] = useState({ uf: 'SP', cidade: '', bairro: '', cnae: '', segmento: '', niche: '' });
   const [receitaResults, setReceitaResults] = useState([]);
+  const [allReceitaLeads, setAllReceitaLeads] = useState([]);
+  const [receitaPage, setReceitaPage] = useState(0);
   const [isScanningReceita, setIsScanningReceita] = useState(false);
   const [receitaProgress, setReceitaProgress] = useState(0);
 
@@ -78,7 +82,14 @@ function AuthenticatedApp({ user, onLogout }) {
   // API Keys (Persistência no LocalStorage)
   const [apiKeys, setApiKeys] = useState(() => {
     const saved = localStorage.getItem('capta_api_keys');
-    return saved ? JSON.parse(saved) : { gemini: '', maps: '', backend: 'http://localhost:3006' };
+    const parsed = saved ? JSON.parse(saved) : { gemini: '', maps: '', backend: 'http://localhost:3007' };
+    
+    // MIGRATION: Se estiver na porta antiga, força a 3007
+    if (parsed.backend === 'http://localhost:3006') {
+      parsed.backend = 'http://localhost:3007';
+    }
+    
+    return parsed;
   });
 
   useEffect(() => {
@@ -89,10 +100,27 @@ function AuthenticatedApp({ user, onLogout }) {
   useEffect(() => {
     const checkBackend = async () => {
       if (!apiKeys.backend) return;
+      const start = Date.now();
       try {
-        const response = await fetch(`${apiKeys.backend}/health`, { method: 'GET' }).catch(() => null);
-        setIsBackendOnline(response && response.ok);
+        const response = await fetch(`${apiKeys.backend}/health`, { method: 'GET' }).catch((e) => {
+          console.error("[HEALTH CHECK ERROR]", e);
+          return null;
+        });
+        if (response && response.ok) {
+          const data = await response.json();
+          console.log("[HEALTH CHECK SUCCESS]", data);
+          setServerStats({
+            latency: Date.now() - start,
+            dbCount: data.db?.count || 0,
+            uptime: data.uptime || 0
+          });
+          setIsBackendOnline(true);
+        } else {
+          console.warn("[HEALTH CHECK OFFLINE] Resposta inválida do servidor");
+          setIsBackendOnline(false);
+        }
       } catch (err) {
+        console.error("[HEALTH CHECK CRITICAL]", err);
         setIsBackendOnline(false);
       }
     };
@@ -104,6 +132,7 @@ function AuthenticatedApp({ user, onLogout }) {
   // CRM States
   const [crmColumns, setCrmColumns] = useState([
     { id: 'leads', title: 'Novos Leads', color: 'border-capta-primary' },
+    { id: 'receita', title: 'RECEITA QUALIFICADA', color: 'border-blue-500' },
     { id: 'contato', title: 'Em Contato', color: 'border-yellow-500' },
     { id: 'qualificado', title: 'Qualificados', color: 'border-blue-500' },
     { id: 'fechamento', title: 'Fechamento', color: 'border-green-500' }
@@ -117,47 +146,275 @@ function AuthenticatedApp({ user, onLogout }) {
   const leads = useQuery(api.leads.getAll) || [];
   const createLead = useMutation(api.leads.add);
   const updateLead = useMutation(api.leads.updateStatus);
+  const updateDetails = useMutation(api.leads.updateDetails);
   const deleteLead = useMutation(api.leads.remove);
 
   const displayLeads = leads;
 
+  // States para WhatsApp
+  const [waMessage, setWaMessage] = useState("Olá [NOME], vi que sua empresa está crescendo e gostaria de apresentar nossas soluções de TI e Segurança Eletrônica da NSTI. Podemos conversar?");
+  const [waLogs, setWaLogs] = useState([]);
+  const [isSendingWA, setIsSendingWA] = useState(false);
+
+  // Modal States
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newLeadData, setNewLeadData] = useState({ name: '', contact: '', socio: '', loc: '', status: 'leads' });
+  const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
+  const [waProgress, setWaProgress] = useState({ processed: 0, total: 0 });
+
+  const [attachDropdown, setAttachDropdown] = useState(false);
+  const [attachUrlInput, setAttachUrlInput] = useState('');
+  const [attachTypeInput, setAttachTypeInput] = useState('instagram');
+
   // Lógica de Scan
-  const handleStartReceitaScan = () => {
+  const handleNicheSelect = (nicheId) => {
+    const nicheMap = {
+      'SAUDE': '8630',
+      'EDUCACAO': '8513',
+      'ESCRITORIOS': '6911',
+      'ENGENHARIA': '7112'
+    };
+    setFiltrosReceita({
+      ...filtrosReceita,
+      niche: nicheId,
+      cnae: nicheMap[nicheId] || ''
+    });
+  };
+
+  const handleStartReceitaScan = async (filtrosOverride = null) => {
+    const filtros = filtrosOverride || filtrosReceita;
     setIsScanningReceita(true);
     setReceitaProgress(0);
-    const interval = setInterval(() => {
-      setReceitaProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsScanningReceita(false);
-          return 100;
-        }
-        return prev + 5;
+    setReceitaResults([]);
+    setAllReceitaLeads([]);
+    setReceitaPage(0);
+    
+    // Simulação de progresso visual enquanto o fetch acontece
+    const progressInterval = setInterval(() => {
+       setReceitaProgress(prev => (prev < 90 ? prev + 2 : prev));
+    }, 500);
+
+    try {
+      const res = await fetch(`${apiKeys.backend}/api/receita/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filtros)
       });
-    }, 200);
+      const data = await res.json();
+      console.log("[DEBUG] Receita Results:", data);
+      
+      const validLeads = (data.leads || [])
+        .filter(l => l.name && l.name !== 'SEM NOME FANTASIA' && l.name !== 'EMPRESA SEM NOME');
+
+      setAllReceitaLeads(validLeads);
+      setReceitaPage(0);
+      setReceitaResults(validLeads.slice(0, 100));
+      clearInterval(progressInterval);
+      setReceitaProgress(100);
+    } catch (err) {
+      clearInterval(progressInterval);
+      console.error("Erro na extração:", err);
+      alert("Erro ao conectar com o motor backend. Verifique se ele está rodando na porta 3007.");
+    } finally {
+      setIsScanningReceita(false);
+    }
   };
 
-  const handleStartMapsScan = (mode) => {
+  const handleDeepQualify = async () => {
+    if (receitaResults.length === 0) return;
+    setIsScanningReceita(true);
+    setReceitaProgress(0);
+    
+    try {
+      const res = await fetch(`${apiKeys.backend}/api/receita/qualify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leads: receitaResults })
+      });
+      const { job_id } = await res.json();
+      
+      const poll = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${apiKeys.backend}/api/hunter/status/${job_id}`);
+          if (!statusRes.ok) return;
+          const job = await statusRes.json();
+          
+          setReceitaProgress(Math.floor((job.processed / job.total) * 100));
+          
+          if (job.status === 'idle') {
+            clearInterval(poll);
+            setIsScanningReceita(false);
+            setReceitaProgress(100);
+            
+            const leadsToMove = job.results || [];
+            console.log(`[DEEP MINING] Movendo ${leadsToMove.length} leads para o CRM...`);
+
+            try {
+              // Movimentação em lotes de 10 para estabilidade
+              for (let i = 0; i < leadsToMove.length; i += 10) {
+                const batch = leadsToMove.slice(i, i + 10);
+                await Promise.all(batch.map(lead => moveToCRM(lead, 'Receita (Qualificado)', 'receita')));
+              }
+
+              const totalBlocks = Math.ceil(allReceitaLeads.length / 100);
+              const isLastBlock = (receitaPage + 1) >= totalBlocks;
+
+              if (!isLastBlock) {
+                alert(`Robô finalizou a Etapa ${receitaPage + 1}! ${leadsToMove.length} leads qualificados foram movidos para o CRM.\n\nPreparando o próximo bloco...`);
+                const nextPage = receitaPage + 1;
+                setReceitaPage(nextPage);
+                setReceitaResults(allReceitaLeads.slice(nextPage * 100, (nextPage + 1) * 100));
+              } else {
+                alert(`Robô finalizou todos os leads! ${leadsToMove.length} leads da última etapa movidos com sucesso.`);
+                setAllReceitaLeads([]);
+                setReceitaResults([]);
+              }
+            } catch (moveErr) {
+              console.error("[CRM MOVE ERROR]", moveErr);
+            }
+          }
+        } catch (e) {
+          console.error("Erro no polling:", e);
+          clearInterval(poll);
+          setIsScanningReceita(false);
+        }
+      }, 3000);
+    } catch (err) {
+      console.error(err);
+      setIsScanningReceita(false);
+    }
+  };
+
+  const handleAddLeadManually = (status = 'leads') => {
+    setNewLeadData({ name: '', contact: '', socio: '', loc: '', status });
+    setIsAddModalOpen(true);
+  };
+
+  const submitNewLead = async () => {
+    if (!newLeadData.name) {
+      alert("O nome da empresa é obrigatório.");
+      return;
+    }
+    try {
+      await createLead({
+        name: newLeadData.name.toUpperCase(),
+        contact: newLeadData.contact,
+        socio: newLeadData.socio,
+        loc: newLeadData.loc,
+        origin: 'Manual',
+        status: newLeadData.status,
+        instagram: newLeadData.instagram,
+        linkedin: newLeadData.linkedin,
+        site: newLeadData.site,
+        mapsUrl: newLeadData.mapsUrl
+      });
+      setIsAddModalOpen(false);
+      console.log("[CRM] Card criado com sucesso!");
+    } catch (err) {
+      console.error("[CRM CREATE FAIL]", err);
+      alert(`Falha ao criar card: ${err.message}`);
+    }
+  };
+
+  const handleStartMapsScan = async (mode) => {
     setIsScanningMaps(true);
-    setMapsLogs(prev => [...prev, { type: 'info', text: `Iniciando motor GMN via ${mode}...` }]);
+    setMapsLogs([]);
+    const endpoint = mode === 'Cloud' ? '/api/hunter/gmn_api' : '/api/hunter/gmn';
+    try {
+      const res = await fetch(`${apiKeys.backend}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filtrosMaps)
+      });
+      const { job_id } = await res.json();
+      const poll = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${apiKeys.backend}/api/hunter/status/${job_id}`);
+          if (!statusRes.ok) return;
+          const job = await statusRes.json();
+          setMapsLogs(job.logs || []);
+          setMapsProgress({ processed: job.processed, total: job.total });
+          if (job.status === 'idle' || job.status === 'error') {
+            clearInterval(poll);
+            setIsScanningMaps(false);
+          }
+        } catch (e) {
+          clearInterval(poll);
+          setIsScanningMaps(false);
+        }
+      }, 2000);
+    } catch (err) {
+      console.error(err);
+      setIsScanningMaps(false);
+    }
   };
 
-  const moveToCRM = async (lead, origin = 'Receita') => {
+  const handleStartWhatsAppSequence = async () => {
+    const targetLeads = leads.filter(l => l.status === 'qualificado');
+    if (targetLeads.length === 0) {
+      alert("Nenhum lead na coluna 'Qualificados' para disparar.");
+      return;
+    }
+
+    setIsSendingWA(true);
+    setWaLogs([{ type: 'info', text: `[📡] Iniciando sequência para ${targetLeads.length} leads...` }]);
+    
+    try {
+      const res = await fetch(`${apiKeys.backend}/api/whatsapp/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leads: targetLeads, messageTemplate: waMessage })
+      });
+      
+      const { job_id } = await res.json();
+      
+      const poll = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${apiKeys.backend}/api/hunter/status/${job_id}`);
+          if (!statusRes.ok) return;
+          const job = await statusRes.json();
+          
+          setWaLogs(job.logs || []);
+          setWaProgress({ processed: job.processed, total: job.total });
+          
+          if (job.status === 'idle' || job.status === 'error') {
+            clearInterval(poll);
+            setIsSendingWA(false);
+          }
+        } catch (e) {
+          clearInterval(poll);
+          setIsSendingWA(false);
+        }
+      }, 2000);
+    } catch (err) {
+      console.error(err);
+      setIsSendingWA(false);
+      setWaLogs(prev => [...prev, { type: 'error', text: `[💥] Erro ao conectar com o servidor: ${err.message}` }]);
+    }
+  };
+
+  const moveToCRM = async (lead, origin = 'Receita', targetStatus = 'leads') => {
     try {
       await createLead({
         name: lead.name || lead["Nome Empresa"] || 'Lead Sem Nome',
         contact: lead.contact || lead["Telefone 1"] || '',
         origin: origin,
+        status: targetStatus,
         site: lead.site || lead["Site"] || '',
         dono: lead.dono || '',
         email: lead.email || lead["E-mail"] || '',
         instagram: lead.instagram || lead["Instagram"] || '',
+        linkedin: lead.linkedin || lead["LinkedIn"] || '',
+        socio: lead.socio || '',
         loc: lead.loc || lead["Endereço"] || '',
-        cnpj: lead.cnpj || ''
+        cnpj: lead.cnpj || '',
+        mapsUrl: lead.googleMaps || lead.mapsUrl || '',
+        security_hook: lead.security_hook
       });
-      alert('Lead movido para o CRM com sucesso!');
+      console.log("[CRM] Lead movido com sucesso!");
     } catch (err) {
-      console.error(err);
+      console.error("[CRM MOVE FAIL]", err);
+      alert(`Falha ao mover lead: ${err.message}`);
     }
   };
 
@@ -205,6 +462,37 @@ function AuthenticatedApp({ user, onLogout }) {
           {/* DASHBOARD */}
           {activeTab === 'dashboard' && (
             <div className="space-y-8 animate-in fade-in duration-700">
+              {/* SERVER HEALTH MONITOR */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                 <div className="bg-capta-surface-low/20 border border-white/5 p-4 flex items-center justify-between">
+                    <div className="space-y-1">
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">Network Latency</div>
+                       <div className={`text-xl font-space font-bold ${serverStats.latency < 100 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {serverStats.latency}ms
+                       </div>
+                    </div>
+                    <Activity size={20} className="text-capta-primary/30" />
+                 </div>
+                 <div className="bg-capta-surface-low/20 border border-white/5 p-4 flex items-center justify-between">
+                    <div className="space-y-1">
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">Total Database Leads</div>
+                       <div className="text-xl font-space font-bold text-white">
+                          {(serverStats.dbCount / 1000000).toFixed(1)}M
+                       </div>
+                    </div>
+                    <Database size={20} className="text-capta-primary/30" />
+                 </div>
+                 <div className="bg-capta-surface-low/20 border border-white/5 p-4 flex items-center justify-between">
+                    <div className="space-y-1">
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">System Engine Uptime</div>
+                       <div className="text-xl font-space font-bold text-white">
+                          {(serverStats.uptime / 3600).toFixed(1)}h
+                       </div>
+                    </div>
+                    <Zap size={20} className="text-capta-primary/30" />
+                 </div>
+              </div>
+
               <div className="relative overflow-hidden bg-gradient-to-br from-capta-primary/10 via-transparent to-transparent border border-white/5 p-10 group">
                 <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8">
                   <div className="space-y-4 max-w-2xl">
@@ -218,7 +506,19 @@ function AuthenticatedApp({ user, onLogout }) {
                       <Button onClick={() => setActiveTab('receita')} className="bg-capta-primary text-capta-bg font-space font-bold h-11 px-6">Iniciar Mineração</Button>
                     </div>
                   </div>
-                  <Database size={40} className="text-capta-primary animate-bounce hidden lg:block" />
+                  <div className="flex flex-col items-center gap-4 bg-capta-surface-low/40 border border-capta-primary/30 p-6 backdrop-blur-xl">
+                     <div className="text-[10px] font-space text-capta-primary uppercase tracking-[0.3em] animate-pulse">Auto-Pilot Mode</div>
+                     <Shield size={48} className="text-capta-primary" />
+                     <Button 
+                       onClick={() => {
+                         setActiveTab('receita');
+                         setFiltrosReceita({...filtrosReceita, niche: 'SAUDE', cnae: '8630'});
+                       }}
+                       className="w-full bg-capta-primary/10 text-capta-primary border border-capta-primary/20 hover:bg-capta-primary hover:text-capta-bg transition-all font-space font-bold uppercase text-[10px] tracking-widest h-10"
+                     >
+                       Prospectar Clientes (Gancho CFTV)
+                     </Button>
+                  </div>
                 </div>
               </div>
 
@@ -281,8 +581,13 @@ function AuthenticatedApp({ user, onLogout }) {
                       <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Cidade Alvo</label>
                       <Input value={filtrosReceita.cidade} onChange={(e) => setFiltrosReceita({...filtrosReceita, cidade: e.target.value})} placeholder="Ex: Rio de Janeiro" className="h-11 bg-capta-surface-lowest border-white/5" />
                     </div>
-                    
+
                     <div className="space-y-2">
+                      <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Bairro</label>
+                      <Input value={filtrosReceita.bairro} onChange={(e) => setFiltrosReceita({...filtrosReceita, bairro: e.target.value})} placeholder="Ex: Copacabana" className="h-11 bg-capta-surface-lowest border-white/5" />
+                    </div>
+                    
+                    <div className="space-y-2 col-span-1 md:col-span-2">
                       <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">CNAE Específico</label>
                       <Input value={filtrosReceita.cnae} onChange={(e) => setFiltrosReceita({...filtrosReceita, cnae: e.target.value})} placeholder="Ex: 4741500" className="h-11 bg-capta-surface-lowest border-white/5" />
                     </div>
@@ -305,7 +610,7 @@ function AuthenticatedApp({ user, onLogout }) {
                     ].map(n => (
                       <button
                         key={n.id}
-                        onClick={() => setFiltrosReceita({...filtrosReceita, niche: n.id})}
+                        onClick={() => handleNicheSelect(n.id)}
                         className={`px-4 py-2 text-[10px] font-space uppercase tracking-wider transition-all duration-200 border ${
                           filtrosReceita.niche === n.id 
                             ? 'bg-capta-primary text-capta-bg border-capta-primary' 
@@ -321,8 +626,8 @@ function AuthenticatedApp({ user, onLogout }) {
                     {isScanningReceita && (
                       <div className="flex-1 mr-6">
                         <div className="flex justify-between text-[10px] font-space mb-2 text-capta-primary tracking-widest uppercase">
-                          <span>Scanning Quantum Database...</span>
-                          <span>{receitaProgress}%</span>
+                          <span>ESCANEANDO BASE DE DADOS...</span>
+                          <span>{receitaResults.length} LEADS ENCONTRADOS</span>
                         </div>
                         <div className="h-1 bg-white/5 w-full rounded-full overflow-hidden">
                           <div className="h-full bg-capta-primary shadow-[0_0_10px_#2fd9f4]" style={{ width: `${receitaProgress}%` }}></div>
@@ -331,25 +636,138 @@ function AuthenticatedApp({ user, onLogout }) {
                     )}
                     
                     <Button 
-                      onClick={handleStartReceitaScan}
+                      onClick={() => handleStartReceitaScan()}
                       disabled={isScanningReceita}
                       size="lg"
-                      className={`min-w-[200px] font-space font-bold uppercase tracking-[0.2em] text-[10px] ${
+                      className={`min-w-[150px] font-space font-bold uppercase tracking-[0.2em] text-[10px] ${
                         isScanningReceita ? 'bg-slate-800 text-slate-500' : 'bg-capta-primary text-capta-bg hover:shadow-[0_0_20px_rgba(47,217,244,0.4)]'
                       }`}
                     >
-                      {isScanningReceita ? 'Infiltrating...' : 'Execute Extraction'}
+                      {isScanningReceita ? 'EXTRAINDO...' : 'EXTRAIR BASE DE DADOS'}
                     </Button>
+
+                    {receitaResults.length > 0 && !isScanningReceita && (
+                      <div className="flex items-center gap-3">
+                        {allReceitaLeads.length > 100 && (
+                          <div className="flex gap-2 mr-2">
+                             <Button 
+                               onClick={() => {
+                                 const prevPage = Math.max(0, receitaPage - 1);
+                                 setReceitaPage(prevPage);
+                                 setReceitaResults(allReceitaLeads.slice(prevPage * 100, (prevPage + 1) * 100));
+                               }}
+                               disabled={receitaPage === 0}
+                               variant="outline"
+                               className="h-11 border-white/10 text-slate-400 hover:text-white"
+                             >
+                               Anterior
+                             </Button>
+                             <div className="flex items-center px-4 bg-white/5 border border-white/10 text-[10px] font-space text-capta-primary uppercase tracking-widest">
+                               Parte {receitaPage + 1} de {Math.ceil(allReceitaLeads.length / 100)}
+                             </div>
+                             <Button 
+                               onClick={() => {
+                                 const nextPage = Math.min(Math.ceil(allReceitaLeads.length / 100) - 1, receitaPage + 1);
+                                 setReceitaPage(nextPage);
+                                 setReceitaResults(allReceitaLeads.slice(nextPage * 100, (nextPage + 1) * 100));
+                               }}
+                               disabled={(receitaPage + 1) >= Math.ceil(allReceitaLeads.length / 100)}
+                               variant="outline"
+                               className="h-11 border-white/10 text-slate-400 hover:text-white"
+                             >
+                               Próxima
+                             </Button>
+                          </div>
+                        )}
+                        
+                        <Button 
+                          onClick={handleDeepQualify}
+                          size="lg"
+                          className="min-w-[150px] font-space font-bold uppercase tracking-[0.2em] text-[10px] bg-capta-primary/20 text-capta-primary border border-capta-primary/30 hover:bg-capta-primary/40"
+                        >
+                          QUALIFICAR ESTA PARTE
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
 
+              {allReceitaLeads.length > 100 && (
+                <div className="text-center text-slate-400 text-[10px] font-space tracking-widest uppercase mt-2">
+                  Total da base local: {allReceitaLeads.length} leads. Fragmentado em blocos de 100 para segurança.
+                </div>
+              )}
+
               {receitaResults.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-8 animate-in slide-in-from-bottom duration-500">
                   {receitaResults.map((lead, i) => (
-                    <Card key={i} className="bg-capta-surface-lowest/40 border-white/5 p-5">
-                      <h4 className="font-space font-bold text-white uppercase text-sm">{lead.name}</h4>
-                      <Button onClick={() => moveToCRM(lead)} className="mt-4 bg-capta-primary text-capta-bg text-[10px] uppercase font-bold">Salvar no CRM</Button>
+                    <Card key={i} className="bg-capta-surface-lowest/40 border border-white/5 p-5 group hover:border-capta-primary/30 transition-all">
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="space-y-1">
+                          <h4 className="font-space font-bold text-white uppercase text-sm group-hover:text-capta-primary transition-colors">{lead.name}</h4>
+                          <div className="text-[10px] font-mono text-slate-500 flex items-center gap-2">
+                             {lead.socio ? (
+                               <span className="text-[9px] font-space font-bold bg-capta-primary/10 text-capta-primary px-2 py-0.5 rounded uppercase tracking-wider">
+                                 Sócio: {lead.socio}
+                               </span>
+                             ) : (
+                               <span className="bg-white/5 px-2 py-0.5 rounded">CNPJ: {lead.cnpj}</span>
+                             )}
+                             <span className="text-capta-primary/50">|</span>
+                             <span>{lead.loc}</span>
+                             {lead.instagram && (
+                             <div className="flex items-center gap-2 text-[10px] text-pink-500/70">
+                               <Instagram size={12} />
+                               Instagram OK
+                             </div>
+                           )}
+                           {lead.site && (
+                             <div className="flex items-center gap-2 text-[10px] text-blue-500/70">
+                               <Globe size={12} />
+                               Site OK
+                             </div>
+                           )}
+                           {!lead.qualified ? (
+                             <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                               <Activity size={12} />
+                               AGUARDANDO ANÁLISE
+                             </div>
+                           ) : lead.security_hook ? (
+                             <div className="flex items-center gap-2 text-[10px] text-red-500 font-bold">
+                               <AlertCircle size={12} />
+                               SEGURANÇA JÁ INSTALADA
+                             </div>
+                           ) : (
+                             <div className="flex items-center gap-2 text-[10px] text-green-500 font-bold">
+                               <Shield size={12} />
+                               POTENCIAL PARA CFTV
+                             </div>
+                           )}
+                        </div>
+                        </div>
+                        <div className="bg-capta-primary/10 px-2 py-1 border border-capta-primary/20 rounded text-[9px] font-space text-capta-primary uppercase">
+                          {lead.origin}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between mt-6">
+                        <div className="flex items-center gap-4">
+                           {lead.contact && (
+                             <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                               <Phone size={12} className="text-capta-primary" />
+                               {lead.contact}
+                             </div>
+                           )}
+                        </div>
+                        <Button 
+                          onClick={() => moveToCRM(lead)} 
+                          size="sm"
+                          className="bg-capta-primary text-capta-bg text-[10px] uppercase font-bold px-4 hover:shadow-[0_0_15px_rgba(47,217,244,0.3)]"
+                        >
+                          Mover para CRM
+                        </Button>
+                      </div>
                     </Card>
                   ))}
                 </div>
@@ -393,87 +811,226 @@ function AuthenticatedApp({ user, onLogout }) {
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <div className="bg-capta-surface-low/50 border border-white/5 flex flex-col font-mono text-[10px] overflow-hidden">
-                  <div className="p-3 border-b border-white/5 bg-white/5 font-space uppercase tracking-widest text-slate-400">
-                    Console de Mineração
-                  </div>
-                  <div className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar bg-black/20">
-                    {mapsLogs.length === 0 ? (
-                      <div className="text-slate-700 italic">Aguardando comando de inicialização...</div>
-                    ) : (
-                      mapsLogs.map((log, i) => (
-                        <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-capta-primary/70'}`}>
-                          <span className="opacity-30">[{new Date().toLocaleTimeString()}]</span>
-                          <span>{log.text}</span>
+
+
+              {/* LISTA DE RESULTADOS MAPS */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pb-10">
+                {leads.filter(l => l.origin.includes('Maps')).map((lead, i) => (
+                  <Card key={i} className="bg-capta-surface-low/30 border-white/5 p-4 group">
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-space font-bold text-white uppercase truncate w-40">{lead.name}</h4>
+                        <div className="flex items-center gap-1 text-yellow-400 text-[10px]">
+                          <Star size={10} fill="currentColor" /> {lead.nota || '0'} 
+                          <span className="text-slate-500 font-mono ml-1">({lead.avaliacoes || '0'} avaliações)</span>
                         </div>
-                      ))
-                    )}
-                  </div>
-                  {isScanningMaps && (
-                    <div className="p-4 border-t border-white/5 bg-capta-primary/5">
-                      <div className="flex justify-between mb-2">
-                        <span className="text-capta-primary uppercase">Progresso</span>
-                        <span>{mapsProgress.processed} / {mapsProgress.total}</span>
                       </div>
-                      <div className="h-1 bg-white/5 w-full">
-                        <div className="h-full bg-capta-primary" style={{ width: `${(mapsProgress.processed / mapsProgress.total) * 100 || 0}%` }}></div>
-                      </div>
+                      <Button onClick={() => moveToCRM(lead, 'Maps')} size="sm" className="h-7 px-2 bg-capta-primary/10 text-capta-primary text-[8px] uppercase font-bold">
+                        Add CRM
+                      </Button>
                     </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* CRM PIPELINE */}
-          {activeTab === 'crm' && (
-            <div className="h-full flex flex-col animate-in fade-in duration-500">
-              <div className="flex items-center justify-between mb-6">
-                <div className="text-xl font-space uppercase tracking-widest flex items-center gap-2"><Users className="text-capta-primary" /> CRM Pipeline</div>
-                <Button onClick={handleAddColumn} className="bg-capta-surface-low border border-capta-surface-high text-xs px-4 h-9">Adicionar Etapa</Button>
-              </div>
-
-              <div className="flex-1 flex gap-4 overflow-x-auto pb-4 items-start">
-                {crmColumns.map(col => (
-                  <div 
-                    key={col.id} 
-                    className="flex-none w-[320px] bg-capta-surface-low border border-capta-surface-high min-h-[100px]"
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, col.id)}
-                  >
-                    <div className={`p-4 border-t-2 ${col.color} bg-capta-surface-lowest/50 flex justify-between items-center`}>
-                       <span className="font-space text-sm uppercase text-white">{col.title}</span>
-                       <span className="text-xs font-mono bg-capta-surface-high px-2 py-0.5 text-slate-300">
-                         {displayLeads.filter(l => l.status === col.id).length}
-                       </span>
-                    </div>
-                    
-                    <div className="p-3 space-y-3">
-                      {displayLeads.filter(l => l.status === col.id).map(lead => (
-                        <Card 
-                          key={lead._id || lead.id} 
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, lead._id || lead.id)}
-                          onDragEnd={handleDragEnd}
-                          className="bg-capta-surface-lowest/80 border-white/5 p-4 cursor-grab active:cursor-grabbing hover:border-capta-primary/50 transition-all"
-                        >
-                          <div className="text-xs font-space font-bold text-white mb-2">{lead.name}</div>
-                          <div className="text-[10px] text-slate-500 mb-4">{lead.contact}</div>
-                          <div className="flex justify-between items-center border-t border-white/5 pt-3">
-                             <Button variant="ghost" size="sm" onClick={() => setEditingLead(lead)} className="h-6 text-[9px] uppercase font-bold text-capta-primary">View</Button>
-                             <select className="bg-transparent text-[9px] text-slate-500 outline-none" value={lead.status} onChange={(e) => updateLead({id: lead._id || lead.id, status: e.target.value})}>
-                                {crmColumns.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                             </select>
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  </div>
+                  </Card>
                 ))}
               </div>
             </div>
           )}
+
+          {/* CRM PIPELINE / KANBAN */}
+          {activeTab === 'crm' && (
+            <div className="flex gap-6 h-[calc(100vh-160px)] overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+              {crmColumns.map(col => (
+                <div 
+                  key={col.id} 
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, col.id)}
+                  className="flex-shrink-0 w-85 flex flex-col bg-capta-surface-low/20 border-t-2 border-white/5 backdrop-blur-md rounded-t-xl"
+                  style={{ borderTopColor: col.color.includes('capta-primary') ? '#2fd9f4' : col.color.replace('border-', '') }}
+                >
+                  <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-space font-bold text-[11px] uppercase tracking-[0.2em] text-white">{col.title}</h3>
+                      <span className="text-[10px] font-mono text-slate-500 bg-white/5 px-2 py-0.5 rounded-full">
+                        {displayLeads.filter(l => l.status === col.id).length}
+                      </span>
+                    </div>
+                    <Button onClick={() => handleAddLeadManually(col.id)} size="icon" variant="ghost" className="h-7 w-7 text-slate-500 hover:text-capta-primary hover:bg-capta-primary/10">
+                      <Plus size={16} />
+                    </Button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                    {displayLeads
+                      .filter(lead => lead.status === col.id)
+                      .map(lead => (
+                        <div
+                          key={lead._id || lead.id}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, lead._id || lead.id)}
+                          onDragEnd={handleDragEnd}
+                          className="bg-capta-surface-lowest/60 border border-white/5 p-4 group hover:border-capta-primary/40 transition-all cursor-grab active:cursor-grabbing relative overflow-hidden flex flex-col gap-3 rounded-md shadow-md"
+                        >
+                          <div className="flex justify-between items-start">
+                            <span className={`text-[8px] font-space px-2 py-0.5 uppercase tracking-tighter rounded ${
+                              lead.origin === 'Receita' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-capta-primary/10 text-capta-primary border border-capta-primary/20'
+                            }`}>
+                              {lead.origin || 'MAPS'}
+                            </span>
+                            {lead.security_hook === false && (
+                              <span className="text-[8px] font-space px-2 py-0.5 uppercase tracking-tighter rounded bg-green-500/10 text-green-400 border border-green-500/20">
+                                Oportunidade
+                              </span>
+                            )}
+                            {lead.security_hook === true && (
+                              <span className="text-[8px] font-space px-2 py-0.5 uppercase tracking-tighter rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                                Concorrente
+                              </span>
+                            )}
+                            <Button 
+                              onClick={(e) => { e.stopPropagation(); deleteLead({ id: lead._id || lead.id }); }} 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-6 w-6 text-slate-700 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Trash2 size={12} />
+                            </Button>
+                          </div>
+                          
+                          <div>
+                            <h4 className="font-space font-bold text-white text-[13px] uppercase leading-tight group-hover:text-capta-primary transition-colors">{lead.name}</h4>
+                            {lead.socio && <div className="text-[10px] font-space text-slate-400 mt-1 uppercase tracking-tighter flex items-center gap-1"><Users size={10} className="text-capta-primary/70" /> SÓCIO: <span className="text-white">{lead.socio}</span></div>}
+                          </div>
+                          
+                          <div className="space-y-2 bg-black/30 p-3 rounded-lg border border-white/5 text-[10px] text-slate-400">
+                             {lead.contact && (
+                               <div className="flex items-center justify-between">
+                                 <div className="flex items-center gap-2">
+                                   <Phone size={10} className="text-green-500/70" /> 
+                                   <span className="font-mono text-white/90">{lead.contact}</span>
+                                 </div>
+                                 <span className="text-[8px] bg-green-500/10 text-green-500 px-1.5 rounded">DIRECT</span>
+                               </div>
+                             )}
+                             {lead.email && <div className="flex items-center gap-2 truncate"><Mail size={10} className="text-yellow-500/70" /> <span className="truncate text-white/80">{lead.email}</span></div>}
+                             {lead.loc && <div className="flex items-center gap-2 truncate opacity-60"><MapPin size={10} className="text-blue-500/70" /> <span className="truncate">{lead.loc}</span></div>}
+                          </div>
+
+                          <div className="mt-2 pt-3 border-t border-white/5 flex justify-between items-center">
+                             <div className="flex gap-2">
+                               {lead.linkedin && (
+                                 <a href={lead.linkedin.startsWith('http') ? lead.linkedin : `https://${lead.linkedin}`} target="_blank" rel="noopener noreferrer" className="p-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded-lg border border-blue-500/30 transition-all flex items-center gap-1.5 px-3" title="LinkedIn" onClick={(e) => e.stopPropagation()}>
+                                   <Linkedin size={12} />
+                                   <span className="text-[9px] font-space font-bold uppercase tracking-wider">LinkedIn</span>
+                                 </a>
+                               )}
+                               {lead.instagram && (
+                                 <a href={lead.instagram.startsWith('http') ? lead.instagram : `https://instagram.com/${lead.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="p-1.5 bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 rounded transition-colors" title="Instagram" onClick={(e) => e.stopPropagation()}>
+                                   <Instagram size={12} />
+                                 </a>
+                               )}
+                               {lead.linkedin && (
+                                 <a href={lead.linkedin.startsWith('http') ? lead.linkedin : `https://${lead.linkedin}`} target="_blank" rel="noopener noreferrer" className="p-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded transition-colors" title="LinkedIn" onClick={(e) => e.stopPropagation()}>
+                                   <Linkedin size={12} />
+                                 </a>
+                               )}
+                               {lead.site && (
+                                 <a href={lead.site.startsWith('http') ? lead.site : `https://${lead.site}`} target="_blank" rel="noopener noreferrer" className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded transition-colors" title="Website" onClick={(e) => e.stopPropagation()}>
+                                   <Globe size={12} />
+                                 </a>
+                               )}
+                             </div>
+                             <Button onClick={(e) => { e.stopPropagation(); setEditingLead(lead); }} variant="ghost" size="sm" className="h-6 px-2 text-[9px] uppercase hover:bg-white/5 border border-transparent hover:border-white/10">Ficha</Button>
+                          </div>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              ))
+            }
+              <Button onClick={handleAddColumn} className="flex-shrink-0 w-12 h-full bg-transparent border border-dashed border-white/5 hover:border-capta-primary/30"><Plus size={20}/></Button>
+            </div>
+          )}
+
+          {/* WHATSAPP */}
+          {activeTab === 'whatsapp' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-500">
+               <Card className="bg-capta-surface-low/50 border-white/5 backdrop-blur-md p-8 h-fit">
+                  <div className="space-y-6">
+                     <div className="space-y-2">
+                        <h2 className="text-2xl font-space font-bold uppercase text-white tracking-widest">Disparos Estratégicos</h2>
+                        <p className="text-xs text-slate-500 font-mono italic">Atenção: O disparo em massa requer que o WhatsApp Web esteja conectado no navegador que o robô abrirá.</p>
+                     </div>
+                     
+                     <div className="space-y-4">
+                        <div className="space-y-2">
+                           <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Selecione a Lista de Destino</label>
+                           <select className="w-full h-11 bg-capta-surface-lowest border border-white/10 px-4 text-white font-space text-sm outline-none focus:border-capta-primary transition-colors">
+                              <option>Leads Qualificados ({leads.filter(l => l.status === 'qualificado').length})</option>
+                              <option>Em Contato ({leads.filter(l => l.status === 'contato').length})</option>
+                              <option>Toda a Base ({leads.length})</option>
+                           </select>
+                        </div>
+
+                        <div className="space-y-2">
+                           <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Template da Mensagem (Use [NOME])</label>
+                           <textarea 
+                              value={waMessage}
+                              onChange={(e) => setWaMessage(e.target.value)}
+                              className="w-full h-48 bg-capta-surface-lowest border border-white/10 p-4 text-white font-space text-sm outline-none focus:border-capta-primary transition-all resize-none"
+                              placeholder="Digite sua mensagem aqui..."
+                           />
+                        </div>
+                     </div>
+
+                     <Button 
+                        onClick={handleStartWhatsAppSequence}
+                        disabled={isSendingWA}
+                        className={`w-full h-16 ${isSendingWA ? 'bg-slate-700' : 'bg-green-600 hover:bg-green-500'} text-white font-space font-bold py-6 uppercase tracking-[0.2em] shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all`}
+                     >
+                        {isSendingWA ? <Activity className="animate-spin mr-2" size={18} /> : <Send size={18} className="mr-2" />}
+                        {isSendingWA ? 'Processando Sequência...' : 'Iniciar Disparos em Massa'}
+                     </Button>
+                  </div>
+               </Card>
+
+               <div className="bg-capta-surface-low/30 border border-white/5 flex flex-col font-mono text-[11px] h-[calc(100vh-200px)] overflow-hidden rounded-xl">
+                  <div className="p-4 border-b border-white/5 bg-white/5 font-space uppercase tracking-[0.2em] text-slate-400 flex justify-between items-center">
+                    <span>Console de Operações WA</span>
+                    {isSendingWA && <span className="text-[10px] text-green-400 animate-pulse">Robô Ativo</span>}
+                  </div>
+                  
+                  <div className="flex-1 p-6 space-y-2 overflow-y-auto custom-scrollbar bg-black/20">
+                    {waLogs.length === 0 ? (
+                      <div className="text-slate-700 italic">Aguardando comando para iniciar prospecção...</div>
+                    ) : (
+                      waLogs.map((log, i) => (
+                        <div key={i} className={`flex gap-3 leading-relaxed ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-slate-300'}`}>
+                          <span className="opacity-20 shrink-0">[{new Date().toLocaleTimeString()}]</span>
+                          <span className="break-all">{log.text}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {isSendingWA && (
+                    <div className="p-6 border-t border-white/5 bg-white/5">
+                      <div className="flex justify-between mb-3">
+                        <span className="text-[10px] font-space uppercase tracking-widest text-green-400">Progresso da Campanha</span>
+                        <span className="font-mono">{waProgress.processed} / {waProgress.total}</span>
+                      </div>
+                      <div className="h-1.5 bg-white/5 w-full rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-green-500 transition-all duration-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" 
+                          style={{ width: `${(waProgress.processed / waProgress.total) * 100 || 0}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  )}
+               </div>
+            </div>
+          )}
+
 
           {/* SETTINGS */}
           {activeTab === 'settings' && (
@@ -505,28 +1062,362 @@ function AuthenticatedApp({ user, onLogout }) {
             </div>
           )}
 
-          {/* MODAL EDIÇÃO */}
+          {/* MODAL EDIÇÃO (TRELLO CLONE) */}
           {editingLead && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <Card className="w-full max-w-lg bg-capta-surface-lowest border-white/5 p-6">
-                <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
-                  <div className="text-sm font-space font-bold text-capta-primary uppercase">Ficha do Lead</div>
-                  <button onClick={() => setEditingLead(null)}><X size={20} /></button>
+              <div className="bg-capta-surface-low border border-white/10 w-full max-w-4xl shadow-2xl rounded-xl flex flex-col md:flex-row overflow-hidden max-h-[90vh]">
+                
+                {/* MAIN CONTENT (LEFT) */}
+                <div className="flex-1 p-6 md:p-8 space-y-8 overflow-y-auto custom-scrollbar">
+                  <div className="flex items-start gap-4">
+                    <Building2 className="text-slate-400 mt-2" size={24} />
+                    <div className="flex-1">
+                      <Input 
+                        value={editingLead.name} 
+                        onChange={(e) => setEditingLead({...editingLead, name: e.target.value})} 
+                        placeholder="Nome da Empresa" 
+                        className="text-2xl font-bold bg-transparent border-transparent hover:border-white/10 focus:bg-black/20 focus:border-capta-primary h-auto py-2 px-3 -ml-3 text-white"
+                      />
+                      <div className="text-xs text-slate-500 ml-1 mt-1 font-space">
+                        na lista <span className="underline decoration-slate-600 cursor-pointer">{editingLead.status}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pl-[40px] space-y-8">
+                    {/* Contato & Localização */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-4 text-slate-300 font-bold font-space text-sm">
+                        <MapPin size={18} className="text-slate-400"/> Contato e Localização
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">Telefone / WhatsApp</label>
+                          <Input value={editingLead.contact} onChange={e => setEditingLead({...editingLead, contact: e.target.value})} placeholder="(00) 00000-0000" className="bg-black/20 border-white/5" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">E-mail Corporativo</label>
+                          <Input value={editingLead.email} onChange={e => setEditingLead({...editingLead, email: e.target.value})} placeholder="contato@empresa.com" className="bg-black/20 border-white/5" />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">Endereço / Cidade</label>
+                          <Input value={editingLead.loc} onChange={e => setEditingLead({...editingLead, loc: e.target.value})} placeholder="São Paulo - SP" className="bg-black/20 border-white/5" />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Sócio / Decisor */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-4 text-slate-300 font-bold font-space text-sm">
+                        <Users size={18} className="text-slate-400"/> Sócio / Decisor
+                      </div>
+                      <div className="space-y-1 w-full md:w-1/2">
+                        <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">Nome Completo</label>
+                        <Input value={editingLead.socio} onChange={e => setEditingLead({...editingLead, socio: e.target.value})} placeholder="Ex: João da Silva" className="bg-black/20 border-white/5" />
+                      </div>
+                    </div>
+
+                    {/* Links e Anexos */}
+                    {(editingLead.instagram || editingLead.site || editingLead.linkedin || editingLead.mapsUrl) && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-4 text-slate-300 font-bold font-space text-sm">
+                          <Paperclip size={18} className="text-slate-400"/> Anexos do Lead
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                          {editingLead.instagram && (
+                            <a href={editingLead.instagram} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 px-4 py-2.5 rounded border border-pink-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                              <Instagram size={14} /> Instagram
+                            </a>
+                          )}
+                          {editingLead.site && (
+                            <a href={editingLead.site} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2.5 rounded border border-emerald-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                              <Globe size={14} /> Site Oficial
+                            </a>
+                          )}
+                          {editingLead.linkedin && (
+                            <a href={editingLead.linkedin} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2.5 rounded border border-blue-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                              <Linkedin size={14} /> LinkedIn
+                            </a>
+                          )}
+                          {editingLead.mapsUrl && (
+                            <a href={editingLead.mapsUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 rounded border border-amber-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                              <MapPin size={14} /> Google Maps
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-4">
-                   <Input value={editingLead.name} onChange={(e) => setEditingLead({...editingLead, name: e.target.value})} placeholder="Nome" />
-                   <Input value={editingLead.contact} onChange={(e) => setEditingLead({...editingLead, contact: e.target.value})} placeholder="Contato" />
+
+                {/* SIDEBAR (RIGHT) */}
+                <div className="w-full md:w-64 bg-black/40 p-6 border-l border-white/5 flex flex-col gap-6">
+                  <div className="flex justify-end">
+                    <button onClick={() => { setEditingLead(null); setAttachDropdown(false); }} className="p-2 text-slate-500 hover:text-white hover:bg-white/5 rounded transition-colors"><X size={20}/></button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="text-[11px] font-space text-slate-400 uppercase tracking-widest mb-2 font-bold">Adicionar ao cartão</div>
+                    
+                    <div className="space-y-2">
+                       <div className="text-[10px] font-space text-slate-500 uppercase tracking-widest mb-1">Análise NSTI</div>
+                       <div className="flex flex-col gap-2">
+                          <button 
+                             onClick={() => setEditingLead({...editingLead, security_hook: false})}
+                             className={`flex items-center gap-2 px-3 py-2 rounded text-[10px] font-space uppercase font-bold border transition-all ${editingLead.security_hook === false ? 'bg-green-500/20 text-green-400 border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'bg-black/20 text-slate-500 border-white/5 hover:border-white/10'}`}
+                          >
+                             <CheckCircle size={14}/> Oportunidade
+                          </button>
+                          <button 
+                             onClick={() => setEditingLead({...editingLead, security_hook: true})}
+                             className={`flex items-center gap-2 px-3 py-2 rounded text-[10px] font-space uppercase font-bold border transition-all ${editingLead.security_hook === true ? 'bg-red-500/20 text-red-400 border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.1)]' : 'bg-black/20 text-slate-500 border-white/5 hover:border-white/10'}`}
+                          >
+                             <AlertCircle size={14}/> Concorrente
+                          </button>
+                       </div>
+                    </div>
+
+                    <div className="h-px bg-white/5 my-2"></div>
+
+                    
+                    {attachDropdown ? (
+                      <div className="bg-black/60 p-4 rounded border border-white/10 space-y-4 shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[10px] uppercase font-space text-slate-400 font-bold tracking-widest">Novo Anexo</span>
+                          <button onClick={() => setAttachDropdown(false)} className="text-slate-500 hover:text-white"><X size={14}/></button>
+                        </div>
+                        <select 
+                          value={attachTypeInput} 
+                          onChange={e=>setAttachTypeInput(e.target.value)} 
+                          className="w-full bg-black/40 text-[11px] font-space border border-white/5 p-2.5 rounded text-slate-300 outline-none focus:border-capta-primary transition-colors"
+                        >
+                          <option value="instagram">Instagram</option>
+                          <option value="site">Site</option>
+                          <option value="linkedin">LinkedIn</option>
+                          <option value="mapsUrl">Google Maps</option>
+                        </select>
+                        <Input 
+                          value={attachUrlInput} 
+                          onChange={e=>setAttachUrlInput(e.target.value)} 
+                          placeholder="Cole o link aqui..." 
+                          className="h-9 text-[11px] bg-black/40 border-white/5 focus:border-capta-primary rounded" 
+                        />
+                        <Button 
+                          onClick={() => {
+                            const newLeadState = {...editingLead, [attachTypeInput]: attachUrlInput};
+                            setEditingLead(newLeadState);
+                            // Auto-save no backend igual ao Trello
+                            updateDetails({ 
+                              id: newLeadState._id || newLeadState.id, 
+                              [attachTypeInput]: attachUrlInput 
+                            });
+                            setAttachDropdown(false);
+                            setAttachUrlInput('');
+                          }} 
+                          size="sm" 
+                          className="w-full h-9 text-[10px] bg-slate-200 text-black hover:bg-white font-bold uppercase tracking-widest rounded"
+                        >
+                          Anexar
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button onClick={() => setAttachDropdown(true)} variant="ghost" className="w-full justify-start gap-3 text-slate-300 hover:text-white hover:bg-white/5 border border-white/5 h-10 bg-black/20 rounded">
+                        <Paperclip size={16}/> Anexar Link
+                      </Button>
+                    )}
+
+                    <div className="pt-6 space-y-3">
+                      <div className="text-[11px] font-space text-slate-400 uppercase tracking-widest mb-2 font-bold">Ações do Cartão</div>
+                      
+                      <Button 
+                        onClick={() => { 
+                          updateDetails({ 
+                            id: editingLead._id || editingLead.id, 
+                            name: editingLead.name, 
+                            contact: editingLead.contact, 
+                            email: editingLead.email, 
+                            loc: editingLead.loc, 
+                            socio: editingLead.socio, 
+                            instagram: editingLead.instagram, 
+                            site: editingLead.site,
+                            linkedin: editingLead.linkedin,
+                            mapsUrl: editingLead.mapsUrl,
+                            security_hook: editingLead.security_hook
+                          }); 
+                          setEditingLead(null); 
+                          setAttachDropdown(false);
+                        }} 
+                        className="w-full justify-start gap-3 bg-capta-primary text-capta-bg font-bold hover:bg-capta-primary/80 h-10 rounded uppercase tracking-widest text-[10px]"
+                      >
+                        <Save size={16}/> Salvar Alterações
+                      </Button>
+                      
+                      <Button onClick={() => { deleteLead({id: editingLead._id || editingLead.id}); setEditingLead(null); setAttachDropdown(false); }} variant="ghost" className="w-full justify-start gap-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/10 h-10 rounded uppercase tracking-widest text-[10px] mt-4">
+                        <Trash2 size={16}/> Excluir Card
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-8 flex justify-end gap-3">
-                   <Button onClick={() => setEditingLead(null)} variant="ghost">Cancelar</Button>
-                   <Button onClick={() => { updateLead({id: editingLead._id || editingLead.id, status: editingLead.status}); setEditingLead(null); }} className="bg-capta-primary text-capta-bg font-bold">Salvar</Button>
-                </div>
-              </Card>
+              </div>
             </div>
           )}
 
         </div>
       </main>
+      
+      {/* MODAL ADICIONAR LEAD (TRELLO CLONE) */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-300">
+          <div className="bg-capta-surface-low border border-white/10 w-full max-w-4xl shadow-2xl rounded-xl flex flex-col md:flex-row overflow-hidden max-h-[90vh]">
+            
+            {/* MAIN CONTENT (LEFT) */}
+            <div className="flex-1 p-6 md:p-8 space-y-8 overflow-y-auto custom-scrollbar">
+              <div className="flex items-start gap-4">
+                <Building2 className="text-capta-primary mt-2" size={24} />
+                <div className="flex-1">
+                  <Input 
+                    autoFocus
+                    value={newLeadData.name} 
+                    onChange={e => setNewLeadData({...newLeadData, name: e.target.value})} 
+                    placeholder="Nome da Nova Empresa" 
+                    className="text-2xl font-bold bg-transparent border-transparent hover:border-white/10 focus:bg-black/20 focus:border-capta-primary h-auto py-2 px-3 -ml-3 text-white placeholder:text-slate-600"
+                  />
+                  <div className="text-xs text-slate-500 ml-1 mt-1 font-space">
+                    criando na lista <span className="text-capta-primary">{newLeadData.status}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pl-[40px] space-y-8">
+                {/* Contato & Localização */}
+                <div>
+                  <div className="flex items-center gap-2 mb-4 text-slate-300 font-bold font-space text-sm">
+                    <MapPin size={18} className="text-slate-400"/> Contato e Localização
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">Telefone / WhatsApp</label>
+                      <Input value={newLeadData.contact} onChange={e => setNewLeadData({...newLeadData, contact: e.target.value})} placeholder="(00) 00000-0000" className="bg-black/20 border-white/5" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">E-mail Corporativo</label>
+                      <Input value={newLeadData.email} onChange={e => setNewLeadData({...newLeadData, email: e.target.value})} placeholder="contato@empresa.com" className="bg-black/20 border-white/5" />
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">Endereço / Cidade</label>
+                      <Input value={newLeadData.loc} onChange={e => setNewLeadData({...newLeadData, loc: e.target.value})} placeholder="São Paulo - SP" className="bg-black/20 border-white/5" />
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Sócio / Decisor */}
+                <div>
+                  <div className="flex items-center gap-2 mb-4 text-slate-300 font-bold font-space text-sm">
+                    <Users size={18} className="text-slate-400"/> Sócio / Decisor
+                  </div>
+                  <div className="space-y-1 w-full md:w-1/2">
+                    <label className="text-[10px] text-slate-500 uppercase font-space tracking-wider">Nome Completo</label>
+                    <Input value={newLeadData.socio} onChange={e => setNewLeadData({...newLeadData, socio: e.target.value})} placeholder="Ex: João da Silva" className="bg-black/20 border-white/5" />
+                  </div>
+                </div>
+
+                {/* Links e Anexos */}
+                {(newLeadData.instagram || newLeadData.site || newLeadData.linkedin || newLeadData.mapsUrl) && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-4 text-slate-300 font-bold font-space text-sm">
+                      <Paperclip size={18} className="text-slate-400"/> Anexos do Lead
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {newLeadData.instagram && (
+                        <a href={newLeadData.instagram} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 px-4 py-2.5 rounded border border-pink-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                          <Instagram size={14} /> Instagram
+                        </a>
+                      )}
+                      {newLeadData.site && (
+                        <a href={newLeadData.site} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2.5 rounded border border-emerald-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                          <Globe size={14} /> Site Oficial
+                        </a>
+                      )}
+                      {newLeadData.linkedin && (
+                        <a href={newLeadData.linkedin} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2.5 rounded border border-blue-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                          <Linkedin size={14} /> LinkedIn
+                        </a>
+                      )}
+                      {newLeadData.mapsUrl && (
+                        <a href={newLeadData.mapsUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-4 py-2.5 rounded border border-amber-500/20 transition-all font-space uppercase text-[10px] tracking-widest font-bold">
+                          <MapPin size={14} /> Google Maps
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* SIDEBAR (RIGHT) */}
+            <div className="w-full md:w-64 bg-black/40 p-6 border-l border-white/5 flex flex-col gap-6">
+              <div className="flex justify-end">
+                <button onClick={() => { setIsAddModalOpen(false); setAttachDropdown(false); }} className="p-2 text-slate-500 hover:text-white hover:bg-white/5 rounded transition-colors"><X size={20}/></button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="text-[11px] font-space text-slate-400 uppercase tracking-widest mb-2 font-bold">Adicionar ao cartão</div>
+                
+                {attachDropdown ? (
+                  <div className="bg-black/60 p-4 rounded border border-white/10 space-y-4 shadow-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-[10px] uppercase font-space text-slate-400 font-bold tracking-widest">Novo Anexo</span>
+                      <button onClick={() => setAttachDropdown(false)} className="text-slate-500 hover:text-white"><X size={14}/></button>
+                    </div>
+                    <select 
+                      value={attachTypeInput} 
+                      onChange={e=>setAttachTypeInput(e.target.value)} 
+                      className="w-full bg-black/40 text-[11px] font-space border border-white/5 p-2.5 rounded text-slate-300 outline-none focus:border-capta-primary transition-colors"
+                    >
+                      <option value="instagram">Instagram</option>
+                      <option value="site">Site</option>
+                      <option value="linkedin">LinkedIn</option>
+                      <option value="mapsUrl">Google Maps</option>
+                    </select>
+                    <Input 
+                      value={attachUrlInput} 
+                      onChange={e=>setAttachUrlInput(e.target.value)} 
+                      placeholder="Cole o link aqui..." 
+                      className="h-9 text-[11px] bg-black/40 border-white/5 focus:border-capta-primary rounded" 
+                    />
+                    <Button 
+                      onClick={() => {
+                        setNewLeadData({...newLeadData, [attachTypeInput]: attachUrlInput});
+                        setAttachDropdown(false);
+                        setAttachUrlInput('');
+                      }} 
+                      size="sm" 
+                      className="w-full h-9 text-[10px] bg-slate-200 text-black hover:bg-white font-bold uppercase tracking-widest rounded"
+                    >
+                      Anexar
+                    </Button>
+                  </div>
+                ) : (
+                  <Button onClick={() => setAttachDropdown(true)} variant="ghost" className="w-full justify-start gap-3 text-slate-300 hover:text-white hover:bg-white/5 border border-white/5 h-10 bg-black/20 rounded">
+                    <Paperclip size={16}/> Anexar Link
+                  </Button>
+                )}
+
+                <div className="pt-6 space-y-3">
+                  <div className="text-[11px] font-space text-slate-400 uppercase tracking-widest mb-2 font-bold">Ações do Cartão</div>
+                  
+                  <Button 
+                    onClick={() => { submitNewLead(); setAttachDropdown(false); }} 
+                    className="w-full justify-start gap-3 bg-capta-primary text-capta-bg font-bold hover:shadow-[0_0_20px_rgba(47,217,244,0.4)] h-10 transition-all rounded uppercase tracking-widest text-[10px]"
+                  >
+                    <Plus size={16}/> Criar Cartão
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

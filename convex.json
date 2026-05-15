@@ -1,5 +1,9 @@
 {
+  "$schema": "node_modules/convex/schemas/convex.schema.json",
   "project": "accurate-tiger-693",
   "team": "leiras",
-  "prodUrl": "https://accurate-tiger-693.convex.cloud"
+  "prodUrl": "https://accurate-tiger-693.convex.cloud",
+  "aiFiles": {
+    "enabled": false
+  }
 }

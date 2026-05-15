@@ -1,5 +1,11 @@
 import express from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
+try {
+  dotenv.config();
+} catch (e) {
+  console.log("⚠️ Dotenv não carregado, usando variáveis de ambiente do sistema.");
+}
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -12,29 +18,59 @@ import puppeteer from 'puppeteer';
 import https from 'https';
 
 import { createClient } from '@libsql/client';
+import { processLeadBatch } from '../scripts/ldr_validator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
+// --- CONFIGURAÇÃO DE CAMINHOS E BANCO ---
 const DB_FILE = path.join(__dirname, '../data/receita_federal.db');
 const DATA_DIR = path.dirname(DB_FILE);
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
+const db = new Database(DB_FILE);
+
+// --- DIAGNÓSTICO DE INICIALIZAÇÃO ---
+try {
+  console.log('--- [🕵️‍♂️] TESTE DE INTEGRIDADE DO BANCO ---');
+  const sample = db.prepare("SELECT * FROM estabelecimentos LIMIT 2").all();
+  console.log('Conexão SQLite OK. Amostra de dados encontrada:', JSON.stringify(sample, null, 2));
+  console.log('--- [✅] FIM DO DIAGNÓSTICO ---');
+} catch (e) {
+  console.error('--- [❌] ERRO AO LER O BANCO:', e.message);
+}
+
+const app = express();
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'DELETE', 'OPTIONS'] }));
+app.use(express.json());
+
+app.get('/api/health', (req, res) => {
+  const dbStatus = fs.existsSync(DB_FILE) ? 'connected' : 'not_found';
+  res.json({ 
+    status: 'online', 
+    uptime: process.uptime(),
+    db: dbStatus,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Alias para compatibilidade com o frontend antigo
+app.get('/health', (req, res) => {
+  const dbStatus = fs.existsSync(DB_FILE) ? 'connected' : 'not_found';
+  res.json({ status: 'online', uptime: process.uptime(), db: dbStatus });
+});
+
+app.get('/', (req, res) => res.send('Capta Prospect Engine - Status: OK'));
+
 // Setup multer para Uploads
 const upload = multer({ dest: path.join(__dirname, 'uploads/') });
 
-const db = new Database(DB_FILE);
-
-// --- CONFIGURAÇÃO TURSO (SQL NA NUVEM) ---
-const turso = createClient({
-  url: process.env.TURSO_URL || "libsql://capta-jes403.aws-us-east-1.turso.io",
-  authToken: process.env.TURSO_TOKEN || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzgzODc4MTMsImlkIjoiMDE5ZTEwMjctNjMwMS03NWIxLWExMDMtMzA5M2QwMWQyZDExIiwicmlkIjoiNjdmNjBmNDUtYmQ3ZC00NDQxLTk4NDMtM2UwOTViMmJiMWNhIn0.SqtELBXXp53hhCOwxDQ72llcRRSGYyMGSGOoWBt6OpY-DFWz3wOkO7ciWYdVH9iu57sKVMND1Ih7_lit2uEaDg",
-});
+// --- CONFIGURAÇÃO TURSO ---
+const turso = (process.env.TURSO_URL && process.env.TURSO_TOKEN) ? createClient({
+  url: process.env.TURSO_URL,
+  authToken: process.env.TURSO_TOKEN,
+}) : null;
 
 const JOBS = {};
 
@@ -56,9 +92,13 @@ app.post('/api/admin/upload-db', upload.single('database'), (req, res) => {
 
 // Helper para acessar o db globalmente se necessário
 global.db = db;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyAfw6Dx_zLagO_lQm9CHRwYS3IHb7Rbt_0";
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || "AIzaSyCJ-RbfpKYkvC-323zdOkdRuM3ysXC0m5c";
-const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN || "apify_api_9RWdIYeKUoDIBlCHyxenAdWhSwgBPj1ULTxQ";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN;
+const SECURITY_KEYWORDS = [
+  'cftv', 'câmera', 'camera', 'monitoramento', 'alarme', 'segurança eletrônica', 'interfone', 'cerca elétrica', 'controle de acesso',
+  'suporte ti', 'helpdesk', 'servicedesk', 'gsti', 'governança ti', 'gestão de ti', 'cybersecurity', 'segurança da informação'
+];
 
 // Storage persistente para Leads do GMN (Maps)
 const GMN_LEADS_FILE = path.join(__dirname, '../data/gmn_leads_storage.json');
@@ -73,24 +113,47 @@ if (fs.existsSync(GMN_LEADS_FILE)) {
 }
 
 function saveGmnLeads() {
-  GMN_LEADS_STORE.lastUpdated = new Date().toISOString();
-  fs.writeFileSync(GMN_LEADS_FILE, JSON.stringify(GMN_LEADS_STORE, null, 2));
+  try {
+    fs.writeFileSync(GMN_LEADS_FILE, JSON.stringify(GMN_LEADS_STORE, null, 2));
+  } catch (e) {
+    console.error('[GMN STORE] Erro ao salvar:', e.message);
+  }
+}
+
+async function searchSocialCandidates(companyName, city, job) {
+  const query = `${companyName} ${city} instagram linkedin oficial`;
+  return await searchWebCandidates(query, job);
 }
 
 async function askGemini(siteText, rules, url, retries = 5, apiKey = null) {
-  const prompt = `Você é um Analista de Qualificação de Leads experiente. Sua missão é analisar o site: ${url}
-  TEXTO E LINKS DO SITE (RESUMO):
+  const prompt = `Você é um Analista de Inteligência Comercial Sênior especializado no modelo NSTI (Núcleo do Suporte).
+  Sua missão é qualificar a empresa através do conteúdo do site: ${url}
+  
+  CONTEÚDO DO SITE PARA ANÁLISE:
+  ---
   ${siteText.substring(0, 10000)}
-  REGRAS DE QUALIFICAÇÃO:
-  "${rules}"
-  Retorne EXATAMENTE UM JSON:
+  ---
+
+  FOCO DA EMPRESA (NSTI):
+  - Governança de TI (GSTI), Suporte Técnico (Help Desk/Service Desk), Segurança Cibernética e CFTV/Segurança Eletrônica.
+  
+  REGRAS DE OURO:
+  1. Identifique se a empresa é B2B (Empresas de médio/grande porte são leads de ouro).
+  2. Procure por nomes de Sócios ou Diretores no "Sobre nós", "Equipe" ou "Contato".
+  3. Identifique o Instagram e E-mail Corporativo de contato comercial.
+  4. ANALISE SE O SITE JÁ OFERECE ou possui:
+     - Se o site já oferece TI ou Segurança -> Marque como "security_hook": true (Concorrente).
+     - Se o site é de uma empresa (Ex: Clínica, Advocacia, Indústria) e NÃO fala de TI/Segurança -> Marque como "security_hook": false (Oportunidade de Prospecção).
+  
+  Retorne EXATAMENTE ESTE JSON:
   {
-    "is_valid": true ou false,
-    "Nome Empresa": "NOME EXTRAÍDO",
-    "E-mail": "EMAIL COMERCIAL",
+    "is_valid": true,
+    "Nome Empresa": "NOME COMERCIAL DA EMPRESA",
+    "E-mail": "EMAIL ENCONTRADO",
     "Instagram": "LINK DO INSTAGRAM",
-    "Google Maps": "LINK OU ENDEREÇO",
-    "Telefone 2": "APENAS NÚMEROS"
+    "Telefone 2": "OUTROS NUMEROS",
+    "security_hook": true ou false,
+    "socio": "NOME DO SÓCIO ENCONTRADO"
   }`;
   
   for (let i = 0; i < retries; i++) {
@@ -124,38 +187,90 @@ function formatProperName(str) {
   }).join(' ');
 }
 
+function normalizeString(str) {
+  if (!str) return "";
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+}
+
 /**
  * BUSCA PROATIVA NO GOOGLE
  * Tenta encontrar o site oficial da empresa se não estiver na base.
  */
-async function discoverSite(companyName, city, job) {
+async function searchWebCandidates(query, job) {
   let browser;
   try {
-    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+    browser = await puppeteer.launch({ 
+      headless: "new", 
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'] 
+    });
     const page = await browser.newPage();
-    const query = `${companyName} ${city} site oficial`;
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
     
-    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, { waitUntil: 'networkidle2' });
-    
-    const firstLink = await page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('div.g a'));
-      const blacklist = ['econodata', 'casadosdados', 'cnpj.biz', 'linkedin.com', 'facebook.com', 'instagram.com', 'youtube.com', 'google.com'];
+    // Tentativa 1: DuckDuckGo
+    await page.goto(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&ia=web`, { waitUntil: 'domcontentloaded' });
+    await new Promise(r => setTimeout(r, 2000));
+
+    let candidates = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a[data-testid="result-title-a"]'));
+      const blacklist = ['econodata', 'casadosdados', 'cnpj.biz', 'linkedin.com/jobs', 'facebook.com', 'youtube.com', 'google.com', 'cnpj.rocks', 'transparencia.cc'];
       
-      for (const link of links) {
-        const href = link.href;
-        if (href && href.startsWith('http') && !blacklist.some(b => href.toLowerCase().includes(b))) {
-          return href;
-        }
-      }
-      return null;
+      return links.slice(0, 5).map(link => ({
+        title: link.innerText,
+        link: link.href
+      })).filter(c => !blacklist.some(b => c.link.toLowerCase().includes(b)));
     });
 
-    return firstLink;
+    // Tentativa 2: Google se DuckDuckGo falhar
+    if (candidates.length === 0) {
+      await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, { waitUntil: 'networkidle2' });
+      candidates = await page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('div.g'));
+        const blacklist = ['econodata', 'casadosdados', 'cnpj.biz', 'linkedin.com/jobs', 'facebook.com', 'youtube.com', 'google.com'];
+        
+        return links.slice(0, 5).map(el => {
+          const a = el.querySelector('a');
+          const h3 = el.querySelector('h3');
+          return {
+            title: h3 ? h3.innerText : '',
+            link: a ? a.href : ''
+          };
+        }).filter(c => c.link && !blacklist.some(b => c.link.toLowerCase().includes(b)));
+      });
+    }
+
+    return candidates;
   } catch (e) {
-    if (job) job.logs.push({ type: 'error', text: `[🌐] Falha na busca Google: ${e.message}` });
-    return null;
+    if (job) job.logs.push({ type: 'error', text: `[🌐] Falha na busca de candidatos: ${e.message}` });
+    return [];
   } finally {
     if (browser) await browser.close();
+  }
+}
+
+async function selectBestLinkWithAI(candidates, companyName, city, apiKey = null) {
+  if (!candidates || candidates.length === 0) return null;
+  
+  const prompt = `Analise os seguintes resultados de busca para a empresa "${companyName}" localizada em "${city}".
+  Identifique qual destes links é o SITE OFICIAL da empresa.
+  
+  CANDIDATOS:
+  ${candidates.map((c, i) => `${i+1}. Título: ${c.title} | Link: ${c.link}`).join('\n')}
+  
+  REGRAS:
+  - Priorize sites que contenham o nome da empresa no domínio ou título.
+  - Se nenhum parecer ser o site oficial (ex: apenas redes sociais ou sites de CNPJ), retorne "null".
+  - Retorne APENAS o link escolhido ou a palavra "null".`;
+
+  try {
+    const activeKey = apiKey || GEMINI_API_KEY;
+    const response = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`, {
+      contents: [{ parts: [{ text: prompt }] }]
+    }, { timeout: 15000 });
+    
+    const result = response.data.candidates[0].content.parts[0].text.trim();
+    return result === "null" ? null : result;
+  } catch (e) {
+    return candidates[0].link; // Fallback para o primeiro se a IA falhar
   }
 }
 
@@ -241,86 +356,107 @@ async function mineCasaDosDados(filters) {
 }
 
 /**
- * MOTOR DE QUALIFICAÇÃO OFICIAL (CAPTA)
- * Segue as regras do instrucoes.txt: Status Site, Nome Comercial (<title>), Instagram e Maps.
+ * MOTOR DE QUALIFICAÇÃO OFICIAL (CAPTA - MODO INVESTIGADOR)
  */
 async function qualifyLead(lead, job, apiKey = null) {
   let site = lead.site || lead["Site"] || "";
   let instagram = lead.instagram || lead["Instagram"] || "";
+  let linkedin = lead.linkedin || lead["LinkedIn"] || "";
   let email = lead.email || lead["E-mail"] || "";
-  let empresa = lead.name || lead["Nome Empresa"] || "";
-  let localizacao = lead.loc || lead["Localização"] || "";
-  let status_site = "offline";
+  let socio = lead.socio || "";
+  let security_hook = false;
+  let status_site = "n/a";
+  let siteText = "";
 
-  // REGRA: Se não tem site, tenta descobrir no Google
+  const empresa = (lead.name || lead["Nome Empresa"] || "").toUpperCase();
+  const localizacao = lead.loc || lead["Localização"] || lead.city || "";
+
+  // 1. BUSCA DE SITE (Se não existir)
   if (!site || site.length < 5) {
-    job.logs.push({ type: 'info', text: `[🌐] Buscando site para ${empresa}...` });
-    const discovered = await discoverSite(empresa, localizacao, job);
-    if (discovered) {
-      site = discovered;
-      job.logs.push({ type: 'success', text: `[🔗] Site encontrado: ${site}` });
-    }
+    job.logs.push({ type: 'info', text: `[🕵️‍♂️] Investigador: Buscando site oficial de "${empresa}"...` });
+    const candidates = await searchWebCandidates(`${empresa} ${localizacao} site oficial`, job);
+    site = await selectBestLinkWithAI(candidates, empresa, localizacao, apiKey);
   }
 
-  if (site && site.length > 4) {
+  // 2. EXTRAÇÃO PROFUNDA (Se site existir)
+  if (site && site.length > 5) {
+    job.logs.push({ type: 'info', text: `[🌐] Acessando site: ${site}...` });
     try {
       const url = site.startsWith("http") ? site : `https://${site}`;
-      const agent = new https.Agent({ rejectUnauthorized: false });
-      
-      const response = await axios.get(url, {
-        timeout: 10000,
-        httpsAgent: agent,
+      const res = await axios.get(url, { 
+        timeout: 10000, 
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        maxRedirects: 5,
         validateStatus: false
       });
-
-      if (response.status >= 200 && response.status < 400) {
+      
+      if (res.status >= 200 && res.status < 400) {
+        const $ = load(res.data);
+        siteText = $('body').text().substring(0, 15000); 
         status_site = "online";
-        const $ = load(response.data);
-        
-        const pageTitle = $('title').text().split('|')[0].split('-')[0].trim();
-        const pageH1 = $('h1').first().text().trim();
-        
-        if (!empresa || empresa === 'SEM NOME FANTASIA' || empresa.length < 3) {
-          const possibleName = (pageH1 && pageH1.length < 40) ? pageH1 : pageTitle;
-          if (possibleName && possibleName.length > 3) {
-             empresa = possibleName.replace(/\s(LTDA|ME|EIRELI|S\.A\.|LIMITADA|EPP|SITE|OFICIAL|HOME|INÍCIO)\b/gi, '').trim();
+
+        // Busca links internos (Sobre/Contato) para aprofundar
+        const subpages = [];
+        $('a').each((i, el) => {
+          const href = $(el).attr('href');
+          if (href && (href.includes('sobre') || href.includes('contato') || href.includes('quem-somos'))) {
+            try { subpages.push(new URL(href, url).href); } catch (e) {}
+          }
+        });
+
+        if (subpages.length > 0) {
+          for (const sub of subpages.slice(0, 2)) {
+            try {
+              const subRes = await axios.get(sub, { timeout: 5000 });
+              siteText += "\n" + load(subRes.data)('body').text().substring(0, 5000);
+            } catch (e) {}
           }
         }
 
-        // Busca aprimorada de Instagram
-        let instaFound = $('a[href*="instagram.com/"]').first().attr('href') || "";
-        if (!instaFound) {
-           // Tenta regex no texto bruto
-           const match = response.data.match(/instagram\.com\/([a-zA-Z0-9._]+)/);
-           if (match) instaFound = `https://www.instagram.com/${match[1]}`;
-        }
-        if (instaFound) instagram = instaFound;
+        // IA: ANÁLISE FORENSE DO SITE (FOCO NO RESPONSÁVEL)
+        job.logs.push({ type: 'info', text: `[🧠] Gemini analisando dados de decisão...` });
+        const promptIA = `
+          Identifique os dados de prospecção para "${empresa}":
+          1. Nome do Responsável (Sócio/Dono/Diretor).
+          2. E-mail comercial ou direto.
+          3. Perfil oficial do Instagram.
+          4. Perfil oficial do LinkedIn.
+          5. Hook de Segurança: Menciona segurança, CFTV ou TI? (true/false)
+          
+          Responda APENAS em JSON:
+          { "socio": "Nome", "email": "email", "instagram": "url", "linkedin": "url", "security_hook": boolean }
+        `;
 
-        let emailFound = $('a[href^="mailto:"]').first().attr('href')?.replace("mailto:", "").split("?")[0].trim() || "";
-        if (!emailFound) {
-           const match = response.data.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-           if (match) emailFound = match[0];
-        }
-        if (emailFound) email = emailFound;
-
-        if (!instagram || !email) {
-          const bodyText = $('body').text().replace(/\s+/g, ' ').substring(0, 5000);
-          const aiRes = await askGemini(bodyText, "Extraia Instagram e E-mail comercial para prospecção", url, 1, apiKey);
-          if (aiRes) {
-            if (!instagram) instagram = aiRes.Instagram || "";
-            if (!email) email = aiRes["E-mail"] || "";
-          }
+        const aiRes = await askGemini(siteText, promptIA, site, 1, apiKey);
+        if (aiRes) {
+          if (aiRes.email) email = aiRes.email;
+          if (aiRes.instagram) instagram = aiRes.instagram;
+          if (aiRes.socio) socio = aiRes.socio;
+          if (aiRes.linkedin) linkedin = aiRes.linkedin;
+          if (aiRes.security_hook !== undefined) security_hook = aiRes.security_hook;
         }
       }
     } catch (e) {
+      job.logs.push({ type: 'warning', text: `[⚠️] Erro no site. Tentando Varredura Social...` });
       status_site = "offline";
     }
   }
 
-  // REGRA: Gerar link do Google Maps com o nome comercial
-  const googleMapsLink = `https://www.google.com/maps/search/${encodeURIComponent(empresa)}`;
+  // 3. VARREDURA SOCIAL PROATIVA (Se faltar dados críticos)
+  if (!linkedin || !socio || !instagram) {
+    try {
+      job.logs.push({ type: 'info', text: `[🔍] Varredura Social: Buscando LinkedIn e Sócios...` });
+      const socialCandidates = await searchSocialCandidates(empresa, localizacao, job);
+      
+      if (!instagram) instagram = socialCandidates.find(c => c.link.includes('instagram.com/'))?.link || "";
+      if (!linkedin) linkedin = socialCandidates.find(c => c.link.includes('linkedin.com/'))?.link || "";
+
+      if (!socio) {
+        const socioSearch = await searchWebCandidates(`quem é o dono da empresa ${empresa} ${localizacao}`, job);
+        const socioAnalysis = await askGemini(JSON.stringify(socioSearch), "Identifique o nome do provável sócio. Retorne apenas o nome.", "", 1, apiKey);
+        if (socioAnalysis && socioAnalysis.socio) socio = socioAnalysis.socio;
+      }
+    } catch (e) {}
+  }
 
   return { 
     ...lead, 
@@ -328,9 +464,13 @@ async function qualifyLead(lead, job, apiKey = null) {
     site, 
     instagram, 
     email,
-    googleMaps: googleMapsLink,
+    linkedin: linkedin || "",
+    socio: socio || "Investigar LinkedIn",
+    contact: lead.contact || lead["Telefone 1"] || "",
     status_site,
-    qualificado: status_site === "online"
+    security_hook,
+    qualified: true,
+    qualificado: true 
   };
 }
 
@@ -380,106 +520,99 @@ const SIAFI_CITIES = {
 
 const NICHE_CONFIG = {
   'SAUDE': {
-    cnaes: ['86'],
+    cnaes: ['8630', '8640'],
     label: 'Saúde e Clínicas'
   },
   'EDUCACAO': {
-    cnaes: ['85'],
+    cnaes: ['8513', '8520'],
     label: 'Educação e Escolas'
   },
   'ESCRITORIOS': {
-    cnaes: ['69', '70'],
+    cnaes: ['6911', '6920', '7112'],
     label: 'Escritórios Estruturados'
   },
   'ENGENHARIA': {
-    cnaes: ['71'],
+    cnaes: ['7112'],
     label: 'Engenharia e Arquitetura'
   }
 };
 
 app.post('/api/receita/scan', async (req, res) => {
-  const { uf, cidade, cnae, segmento, niche, excludeMei = true, ping = false } = req.body;
-  
-  if (ping) return res.json({ status: 'online' });
-  
+  const { uf, cidade, bairro, cnae, segmento } = req.body;
   try {
-    const upperCidade = cidade ? cidade.toUpperCase().trim() : '';
+    const upperCidade = normalizeString(cidade);
+    const upperBairro = normalizeString(bairro);
+    const upperSegmento = normalizeString(segmento);
+    const cityCode = SIAFI_CITIES[upperCidade] || null;
+    
     let leads = [];
 
-    // --- PRIORIDADE 1: TURSO (SQL NA NUVEM) ---
-    console.log("[☁️] Buscando no Turso (SQL Cloud)...");
-    try {
-      // Simplificando a query para o Turso para garantir compatibilidade inicial
-      let sql = `SELECT * FROM estabelecimentos WHERE 1=1`;
-      const params = [];
-      
-      if (uf) {
-        sql += ` AND uf = ?`;
-        params.push(uf);
-      }
-      
-      if (cnae) {
-        sql += ` AND cnae_principal LIKE ?`;
-        params.push(`${cnae}%`);
-      }
-      
-      sql += ` LIMIT 100`;
-
-      const result = await turso.execute({ sql, args: params });
-      
-      leads = result.rows.map(row => ({
-        id: row.id || `rec_${Math.random().toString(36).substr(2, 9)}`,
-        name: row.nome_fantasia || row.razao_social || 'EMPRESA SEM NOME',
-        cnpj: row.cnpj || row.cnpj_basico || '',
-        loc: `${row.logradouro || ''}, ${row.numero || ''} - ${row.uf}`,
-        origin: 'Receita (Turso Cloud)',
-        status: 'new'
-      }));
-      
-      console.log(`[☁️] Turso retornou ${leads.length} leads.`);
-    } catch (tursoErr) {
-      console.error("[☁️❌] Erro no Turso:", tursoErr.message);
-    }
-
-    // --- PRIORIDADE 2: SQLITE LOCAL (SE O TURSO FALHAR OU ESTIVER VAZIO E O ARQUIVO EXISTIR) ---
-    if (leads.length === 0 && fs.existsSync(DB_FILE)) {
+    // --- MOTOR 100% LOCAL (ARQUIVO DE 11M LEADS) ---
+    if (fs.existsSync(DB_FILE)) {
       try {
-        console.log("[🗄️] Buscando no SQLite Local...");
-        // (Mantendo a lógica simplificada para o SQLite local se necessário)
-        const localResult = db.prepare("SELECT * FROM estabelecimentos LIMIT 50").all();
-        leads = localResult.map(row => ({
-            id: row.id || `rec_${Math.random().toString(36).substr(2, 9)}`,
-            name: row.nome_fantasia || row.razao_social || 'EMPRESA SEM NOME',
-            cnpj: row.cnpj || row.cnpj_basico || '',
-            loc: `${row.logradouro || ''}, ${row.numero || ''} - ${row.uf}`,
-            origin: 'Receita (Local)',
-            status: 'new'
-        }));
-      } catch (localErr) {
-        console.log("[🗄️❌] SQLite Local vazio ou falhou.");
-      }
-    }
+        console.log(`[🗄️] Buscando na base local: ${upperCidade || 'Geral'}...`);
+        
+        let localSql = "SELECT * FROM estabelecimentos WHERE 1=1";
+        const localParams = [];
+        
+        if (uf) { localSql += " AND uf = ?"; localParams.push(uf.toUpperCase()); }
+        
+        if (cityCode) {
+            localSql += " AND municipio = ?";
+            localParams.push(cityCode);
+        } else if (upperCidade) {
+            localSql += " AND municipio LIKE ?";
+            localParams.push(`%${upperCidade}%`);
+        }
 
-    // --- PRIORIDADE 3: ROBÔ (FALLBACK FINAL) ---
-    if (leads.length === 0) {
-      console.log("[🤖] Ativando Robô Caçador (Casa dos Dados)...");
-      let searchCnae = cnae;
-      if (niche && NICHE_CONFIG[niche]) {
-        searchCnae = NICHE_CONFIG[niche].cnaes[0];
+        if (upperBairro) { localSql += " AND bairro LIKE ?"; localParams.push(`%${upperBairro}%`); }
+        if (cnae) { localSql += " AND cnae LIKE ?"; localParams.push(`${cnae}%`); }
+        
+        if (upperSegmento) { 
+            localSql += " AND (nome_fantasia LIKE ? OR logradouro LIKE ?)"; 
+            localParams.push(`%${upperSegmento}%`, `%${upperSegmento}%`); 
+        }
+        
+        localSql += " LIMIT 100";
+        
+        const localResult = db.prepare(localSql).all(...localParams);
+        
+        leads = localResult.map(row => {
+            let socio = '';
+            try {
+               // Conexão entre estabelecimentos (cnpj_base) e socios (cnpj_basico)
+               const socioRow = db.prepare("SELECT nome_socio FROM socios WHERE cnpj_basico = ? LIMIT 1").get(row.cnpj_base);
+               if (socioRow) socio = socioRow.nome_socio;
+            } catch (e) {}
+
+            return {
+                id: row.id || `rec_${Math.random().toString(36).substr(2, 9)}`,
+                name: row.nome_fantasia || 'EMPRESA SEM NOME',
+                cnpj: row.cnpj_base || '',
+                socio: socio,
+                loc: `${row.logradouro || ''}, ${row.numero || ''} - ${row.uf}`,
+                origin: 'Receita (Arquivo Local)',
+                status: 'new',
+                contact: row.tel1 || row.tel2 || row.email || ''
+            };
+        });
+        console.log(`[🗄️] Sucesso! ${leads.length} registros encontrados no SQLite.`);
+
+        /* APLICAÇÃO DO CRIVO LDR AUTOMÁTICO (Desativado no Scan Inicial para não sumir com leads sem site)
+        console.log(`[🛡️] Ativando Crivo LDR para validar sites e reputação...`);
+        const validatedLeads = await processLeadBatch(leads);
+        leads = validatedLeads;
+        */
+        console.log(`[🏆] Busca concluída! ${leads.length} leads encontrados no SQLite.`);
+      } catch (localErr) {
+        console.error("[🗄️❌] Erro no seu arquivo SQLite:", localErr.message);
       }
-      const scraped = await mineCasaDosDados({ cnae: searchCnae, uf, municipio: cidade });
-      leads = (scraped || []).filter(l => l && l.razao_social).map(l => ({
-        ...l,
-        name: l.razao_social,
-        origin: `Receita (Robô - ${niche || 'Geral'})`,
-        status: 'new'
-      }));
     }
 
     res.json({ leads });
-  } catch (error) {
-    console.error('❌ [ERRO BACKEND]:', error);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error("[❌] Erro crítico no motor:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -497,20 +630,24 @@ app.post('/api/receita/qualify', async (req, res) => {
     const job = JOBS[jobId];
     job.logs.push({ type: 'info', text: `[🚀] Iniciando qualificação de ${leads.length} leads da Receita...` });
 
-    for (const lead of leads) {
-      if (!lead || !lead.name) {
-        job.processed++;
-        continue;
-      }
-      try {
-        job.logs.push({ type: 'info', text: `[🔍] Analisando: ${lead.name}...` });
-        const qualified = await qualifyLead(lead, job);
-        job.results.push(qualified);
-        job.processed++;
-      } catch (e) {
-        job.logs.push({ type: 'error', text: `[❌] Erro em ${lead.name}: ${e.message}` });
-        job.processed++;
-      }
+    const BATCH_SIZE = 2; // Reduzido para evitar bloqueios de IP e sobrecarga
+    for (let i = 0; i < leads.length; i += BATCH_SIZE) {
+      const batch = leads.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async (lead) => {
+        if (!lead || !lead.name) {
+          job.processed++;
+          return;
+        }
+        try {
+          job.logs.push({ type: 'info', text: `[🔍] Analisando: ${lead.name}...` });
+          const qualified = await qualifyLead(lead, job);
+          job.results.push(qualified);
+        } catch (e) {
+          job.logs.push({ type: 'error', text: `[❌] Erro em ${lead.name}: ${e.message}` });
+        } finally {
+          job.processed++;
+        }
+      }));
     }
 
     job.status = 'idle';
@@ -733,7 +870,104 @@ app.delete('/api/hunter/gmn_leads', (req, res) => {
   res.json({ success: true });
 });
 
-const PORT = process.env.PORT || 3006;
+// --- MOTOR DE DISPAROS WHATSAPP (PUPPETEER) ---
+app.post('/api/whatsapp/send', async (req, res) => {
+  const { leads, messageTemplate } = req.body;
+  if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: "Leads obrigatórios" });
+
+  const jobId = `wa_${Date.now()}`;
+  JOBS[jobId] = { type: 'whatsapp', status: 'processing', total: leads.length, processed: 0, results: [], logs: [] };
+  res.json({ job_id: jobId, message: 'Sequência de disparos iniciada!' });
+
+  (async () => {
+    const job = JOBS[jobId];
+    let browser;
+    try {
+      job.logs.push({ type: 'info', text: '[🚀] Iniciando robô de WhatsApp...' });
+      
+      browser = await puppeteer.launch({
+        headless: false, // Abrimos o navegador para você ver o processo
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        userDataDir: './wa_session' // Salva sua sessão do WhatsApp Web
+      });
+
+      const page = await browser.newPage();
+      await page.goto('https://web.whatsapp.com', { waitUntil: 'networkidle2', timeout: 60000 });
+      
+      job.logs.push({ type: 'info', text: '[⏳] Aguardando conexão do WhatsApp Web... (Leia o QR Code se necessário)' });
+      
+      // Aguarda o seletor da lista de conversas para confirmar que logou
+      try {
+        await page.waitForSelector('div[contenteditable="true"]', { timeout: 120000 });
+      } catch (e) {
+        job.logs.push({ type: 'error', text: '[❌] Tempo esgotado para login no WhatsApp.' });
+        await browser.close();
+        job.status = 'error';
+        return;
+      }
+
+      for (const lead of leads) {
+        try {
+          const rawNumber = String(lead.contact || "").replace(/[^\d]/g, '');
+          if (rawNumber.length < 10) {
+            job.logs.push({ type: 'error', text: `[⚠️] Número inválido para ${lead.name}` });
+            job.processed++;
+            continue;
+          }
+
+          // Formata o número (DDI 55 + DDD + Número)
+          const phone = rawNumber.startsWith('55') ? rawNumber : `55${rawNumber}`;
+          const personalizedMsg = messageTemplate.replace(/\[NOME\]/gi, lead.name || 'Parceiro');
+
+          job.logs.push({ type: 'info', text: `[💬] Abrindo conversa com: ${lead.name}...` });
+          
+          // Abre o link direto do WA
+          await page.goto(`https://web.whatsapp.com/send?phone=${phone}`, { waitUntil: 'networkidle2' });
+          
+          // Aguarda o campo de texto aparecer
+          const inputSelector = 'div[contenteditable="true"][data-tab="10"]';
+          await page.waitForSelector(inputSelector, { timeout: 30000 });
+          
+          job.logs.push({ type: 'info', text: `[⌨️] Simulando digitação para ${lead.name}...` });
+          
+          // Foca no campo e digita pausadamente
+          await page.focus(inputSelector);
+          for (const char of personalizedMsg) {
+            await page.keyboard.sendCharacter(char);
+            if (Math.random() > 0.8) await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
+          }
+
+          // Pequena pausa antes de enviar
+          await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+          
+          await page.keyboard.press('Enter');
+
+          job.logs.push({ type: 'success', text: `[✅] Mensagem enviada para ${lead.name}!` });
+          job.results.push({ name: lead.name, status: 'sent' });
+          
+          // Delay humano para evitar bloqueio (8-15 segundos entre leads)
+          const waitTime = 8000 + Math.random() * 7000;
+          job.logs.push({ type: 'info', text: `[⏳] Pausa de segurança: ${Math.round(waitTime/1000)}s...` });
+          await new Promise(r => setTimeout(r, waitTime));
+          
+        } catch (err) {
+          job.logs.push({ type: 'error', text: `[❌] Falha no envio para ${lead.name}: ${err.message}` });
+        }
+        job.processed++;
+      }
+
+      job.status = 'idle';
+      job.logs.push({ type: 'success', text: '[🏆] Sequência de disparos finalizada com sucesso!' });
+      // Mantemos o navegador aberto para você ver a última mensagem enviada se quiser
+    } catch (e) {
+      job.status = 'error';
+      job.logs.push({ type: 'error', text: `[💥] Erro crítico: ${e.message}` });
+      if (browser) await browser.close();
+    }
+  })();
+});
+
+const PORT = process.env.PORT || 3007;
 app.post('/api/mine/casadosdados', async (req, res) => {
   const { cnae, uf, municipio } = req.body;
   try {
@@ -744,6 +978,14 @@ app.post('/api/mine/casadosdados', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[CAPTA-NC] Backend Master rodando na porta ${PORT}`);
-});
+try {
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[CAPTA-NC] Backend Master rodando na porta ${PORT}`);
+  });
+  
+  server.on('error', (err) => {
+    console.error('[💥] ERRO NO SERVIDOR HTTP:', err);
+  });
+} catch (e) {
+  console.error('[💥] FALHA CRÍTICA AO INICIAR SERVIDOR:', e);
+}

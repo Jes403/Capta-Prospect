@@ -64,19 +64,25 @@ export const add = mutation({
     origin: v.string(),
     site: v.optional(v.string()),
     instagram: v.optional(v.string()),
+    linkedin: v.optional(v.string()),
+    mapsUrl: v.optional(v.string()),
     dono: v.optional(v.string()),
+    socio: v.optional(v.string()),
     cnpj: v.optional(v.string()),
     notes: v.optional(v.string()),
+    status: v.optional(v.string()),
+    security_hook: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     // Modo Local: Permitir inserção sem auth
     // if (!userId) throw new Error("Não autenticado.");
     
+    const { status, ...rest } = args;
     const now = Date.now();
     return await ctx.db.insert("leads", {
-      ...args,
-      status: "new",
+      ...rest,
+      status: status || "leads",
       createdAt: now,
       updatedAt: now,
     });
@@ -94,6 +100,27 @@ export const updateStatus = mutation({
     // if (!userId) throw new Error("Não autenticado.");
     
     await ctx.db.patch(id, { status, updatedAt: Date.now() });
+  },
+});
+
+// Atualiza detalhes completos do lead (Trello Edit Modal)
+export const updateDetails = mutation({
+  args: {
+    id: v.id("leads"),
+    name: v.optional(v.string()),
+    contact: v.optional(v.string()),
+    email: v.optional(v.string()),
+    loc: v.optional(v.string()),
+    socio: v.optional(v.string()),
+    instagram: v.optional(v.string()),
+    site: v.optional(v.string()),
+    linkedin: v.optional(v.string()),
+    mapsUrl: v.optional(v.string()),
+    security_hook: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const { id, ...updates } = args;
+    await ctx.db.patch(id, { ...updates, updatedAt: Date.now() });
   },
 });
 
