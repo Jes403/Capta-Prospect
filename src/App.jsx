@@ -74,10 +74,12 @@ function AuthenticatedApp({ user, onLogout }) {
   const [receitaProgress, setReceitaProgress] = useState(0);
 
   // States para Maps
-  const [filtrosMaps, setFiltrosMaps] = useState({ keyword: '', location: '' });
+  const [filtrosMaps, setFiltrosMaps] = useState({ keyword: '', location: '', minRating: '0', minReviews: '0' });
   const [isScanningMaps, setIsScanningMaps] = useState(false);
   const [mapsLogs, setMapsLogs] = useState([]);
   const [mapsScanResults, setMapsScanResults] = useState([]);
+  const [storedGmnLeads, setStoredGmnLeads] = useState([]);
+  const [activeMapJobId, setActiveMapJobId] = useState(null);
   const [mapsProgress, setMapsProgress] = useState({ processed: 0, total: 0 });
 
   // API Keys (Persistência no LocalStorage)
@@ -327,10 +329,49 @@ function AuthenticatedApp({ user, onLogout }) {
     }
   };
 
-  const handleStartMapsScan = async (mode) => {
-    setIsScanningMaps(true);
-    setMapsLogs([]);
+  const fetchGmnLeads = async () => {
+    if (!apiKeys.backend) return;
+    try {
+      const res = await fetch(`${apiKeys.backend}/api/hunter/gmn_leads`);
+      const data = await res.json();
+      const normalized = (data.leads || []).map(l => ({
+        ...l,
+        name: l.name || l["Nome Empresa"] || 'SEM NOME',
+        phone: l.phone || l["Telefone 1"] || '',
+        rating: l.rating || l["Nota"] || '0',
+        reviews: l.reviews || l["Avaliações"] || '0',
+        address: l.address || l["Endereço"] || '',
+        site: l.site || l["Site"] || '',
+        instagram: l.instagram || l["Instagram"] || '',
+        mapsUrl: l.mapsUrl || l["Google Maps"] || '',
+        socio: l.socio || l["Decisor"] || '',
+        email: l.email || l["E-mail"] || '',
+        origin: 'Google Maps'
+      }));
+      setStoredGmnLeads(normalized);
+    } catch (e) { console.error('Erro ao buscar leads GMN', e); }
+  };
+
+  useEffect(() => { fetchGmnLeads(); }, [apiKeys.backend]);
+  useEffect(() => {
+    if (activeTab !== 'maps') return;
+    const interval = setInterval(fetchGmnLeads, 5000);
+    return () => clearInterval(interval);
+  }, [activeTab, apiKeys.backend]);
+
+  const clearGmnLeads = async () => {
+    if (!confirm("Limpar toda a base extraída do Google Maps?")) return;
+    await fetch(`${apiKeys.backend}/api/hunter/gmn_leads`, { method: 'DELETE' });
+    setStoredGmnLeads([]);
     setMapsScanResults([]);
+  };
+
+  const handleStartMapsScan = async (mode) => {
+    if (!filtrosMaps.keyword) return alert("Digite um Nicho/Keyword antes de iniciar!");
+    setIsScanningMaps(true);
+    setMapsLogs([{ type: 'info', text: `[🚀] Iniciando motor ${mode === 'Cloud' ? 'API GOOGLE' : 'PUPPETEER'}...` }]);
+    setMapsScanResults([]);
+    setMapsProgress({ total: 0, processed: 0 });
     const endpoint = mode === 'Cloud' ? '/api/hunter/gmn_api' : '/api/hunter/gmn';
     try {
       const res = await fetch(`${apiKeys.backend}${endpoint}`, {
@@ -338,10 +379,12 @@ function AuthenticatedApp({ user, onLogout }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(filtrosMaps)
       });
-      const { job_id } = await res.json();
+      const data = await res.json();
+      const jobId = data.job_id;
+      if (jobId) setActiveMapJobId(jobId);
       const poll = setInterval(async () => {
         try {
-          const statusRes = await fetch(`${apiKeys.backend}/api/hunter/status/${job_id}`);
+          const statusRes = await fetch(`${apiKeys.backend}/api/hunter/status/${jobId}`);
           if (!statusRes.ok) return;
           const job = await statusRes.json();
           setMapsLogs(job.logs || []);
@@ -349,6 +392,7 @@ function AuthenticatedApp({ user, onLogout }) {
           if (job.status === 'idle' || job.status === 'error') {
             clearInterval(poll);
             setIsScanningMaps(false);
+            setActiveMapJobId(null);
             if (job.results && job.results.length > 0) {
               const normalized = job.results.map(l => ({
                 ...l,
@@ -366,6 +410,7 @@ function AuthenticatedApp({ user, onLogout }) {
               }));
               setMapsScanResults(normalized);
             }
+            fetchGmnLeads();
           }
         } catch (e) {
           clearInterval(poll);
@@ -903,76 +948,161 @@ function AuthenticatedApp({ user, onLogout }) {
           {/* EXTRAÇÃO MAPS - GMN HÍBRIDO PRO */}
           {activeTab === 'maps' && (
             <div className="space-y-6 animate-in fade-in duration-500 h-[calc(100vh-180px)] flex flex-col">
+
+              {/* Top Controls Bar */}
               <div className="flex items-center justify-between bg-capta-surface-low border border-white/5 p-4 backdrop-blur-md">
-                <div className="flex items-center gap-6">
-                   <div className="flex items-center gap-2">
-                     <div className="w-2 h-2 rounded-full bg-capta-primary animate-pulse"></div>
-                     <span className="text-[10px] font-space uppercase tracking-widest text-capta-primary font-bold">GMN Hybrid Engine v4.0</span>
-                   </div>
-                   <div className="h-4 w-[1px] bg-white/10"></div>
-                   <Input value={filtrosMaps.location} onChange={(e) => setFiltrosMaps({...filtrosMaps, location: e.target.value})} placeholder="Localização" className="h-9 w-48 bg-black/20 border-white/5 font-space text-[11px]" />
-                   <Input value={filtrosMaps.keyword} onChange={(e) => setFiltrosMaps({...filtrosMaps, keyword: e.target.value})} placeholder="Nicho/Keyword" className="h-9 w-48 bg-black/20 border-white/5 font-space text-[11px]" />
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-capta-primary animate-pulse"></div>
+                    <span className="text-[10px] font-space uppercase tracking-widest text-capta-primary font-bold">GMN Hybrid Engine v4.0</span>
+                  </div>
+                  <div className="h-4 w-[1px] bg-white/10 hidden lg:block"></div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest hidden lg:block">Target:</span>
+                    <Input value={filtrosMaps.location} onChange={(e) => setFiltrosMaps({...filtrosMaps, location: e.target.value})} placeholder="Ex: Rio de Janeiro, RJ" className="h-8 w-44 bg-black/20 border-white/5 font-space text-[10px]" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest hidden lg:block">Nicho:</span>
+                    <Input value={filtrosMaps.keyword} onChange={(e) => setFiltrosMaps({...filtrosMaps, keyword: e.target.value})} placeholder="Ex: Clínicas Estéticas" className="h-8 w-44 bg-black/20 border-white/5 font-space text-[10px]" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest hidden lg:block">Min ⭐:</span>
+                    <Input value={filtrosMaps.minRating} onChange={(e) => setFiltrosMaps({...filtrosMaps, minRating: e.target.value})} placeholder="0" className="h-8 w-16 bg-black/20 border-white/5 font-space text-[10px] text-center" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest hidden lg:block">Min Aval.:</span>
+                    <Input value={filtrosMaps.minReviews} onChange={(e) => setFiltrosMaps({...filtrosMaps, minReviews: e.target.value})} placeholder="0" className="h-8 w-16 bg-black/20 border-white/5 font-space text-[10px] text-center" />
+                  </div>
                 </div>
-                <div className="flex gap-3">
-                   <Button onClick={() => handleStartMapsScan('Cloud')} disabled={isScanningMaps} className="bg-capta-primary/10 text-capta-primary border border-capta-primary/20 text-[9px] font-space font-bold uppercase px-4 h-9">
-                      Cloud Mining
-                   </Button>
-                   <Button onClick={() => handleStartMapsScan('Local')} disabled={isScanningMaps} className="bg-capta-primary text-capta-bg text-[9px] font-space font-bold uppercase px-4 h-9">
-                      Local Injector
-                   </Button>
+                <div className="flex gap-2 items-center shrink-0">
+                  <Button onClick={clearGmnLeads} variant="ghost" className="text-red-400 hover:bg-red-400/10 text-[9px] font-space uppercase tracking-widest h-8 px-3">
+                    <Trash2 size={12} className="mr-1" /> Limpar
+                  </Button>
+                  <Button onClick={() => handleStartMapsScan('Cloud')} disabled={isScanningMaps} className="bg-capta-primary/10 text-capta-primary border border-capta-primary/20 text-[9px] font-space font-bold uppercase px-4 h-9">
+                    {isScanningMaps ? <Activity size={12} className="animate-spin mr-1" /> : null} Cloud Mining
+                  </Button>
+                  <Button onClick={() => handleStartMapsScan('Local')} disabled={isScanningMaps} className="bg-capta-primary text-capta-bg text-[9px] font-space font-bold uppercase px-4 h-9">
+                    Local Injector
+                  </Button>
                 </div>
               </div>
 
-              <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-0">
-                <div className="lg:col-span-2 bg-black/40 border border-white/5 relative group">
+              {/* Main Grid: Mapa + Painel Lateral */}
+              <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-hidden min-h-0">
+
+                {/* Google Maps Iframe */}
+                <div className="lg:col-span-8 bg-black/40 border border-white/5 relative overflow-hidden group flex flex-col">
+                  <div className="p-2 bg-capta-surface-low/80 backdrop-blur-md border-b border-white/5 flex justify-between items-center shrink-0">
+                    <span className="text-[8px] font-mono text-slate-500 uppercase flex items-center gap-2">
+                      <Globe size={10} /> maps.google.com — integrated_terminal
+                    </span>
+                    <Button onClick={() => window.open(`https://www.google.com/maps/search/${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}`, '_blank')}
+                      className="bg-black/40 hover:bg-black/70 text-white border border-white/10 text-[8px] font-space uppercase h-6 px-2">
+                      <ExternalLink size={9} className="mr-1" /> Abrir Maps
+                    </Button>
+                  </div>
                   {(filtrosMaps.keyword || filtrosMaps.location) ? (
                     <iframe
-                      src={`https://www.google.com/maps?q=${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}&output=embed`}
-                      className="w-full h-full border-none grayscale-[0.3] opacity-60 group-hover:opacity-100 transition-opacity"
+                      src={`https://www.google.com/maps?q=${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}&output=embed&hl=pt-BR`}
+                      className="flex-1 w-full border-none grayscale-[0.2]"
+                      title="Google Maps Mining Area"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <div className="text-center space-y-2 opacity-30">
-                        <MapPin size={32} className="text-capta-primary mx-auto" />
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="text-center space-y-3 opacity-25">
+                        <MapPin size={40} className="text-capta-primary mx-auto" />
                         <p className="text-[11px] font-space uppercase tracking-widest text-slate-500">Digite Localização e Nicho para ativar o mapa</p>
                       </div>
                     </div>
                   )}
-                  <div className="absolute top-4 left-4 p-3 bg-capta-bg/90 border border-capta-primary/30 backdrop-blur-md">
-                    <div className="text-[10px] font-mono text-capta-primary flex items-center gap-2">
-                      <Activity size={12} className="animate-pulse" />
-                      COORD_STREAM: ACTIVE
+                  <div className="absolute top-12 left-4 p-2 bg-capta-bg/90 border border-capta-primary/30 backdrop-blur-md">
+                    <div className="text-[9px] font-mono text-capta-primary flex items-center gap-2">
+                      <Activity size={10} className="animate-pulse" /> COORD_STREAM: ACTIVE
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* LISTA DE RESULTADOS MAPS — só após scan */}
-              {mapsScanResults.length > 0 && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pb-10">
-                  {mapsScanResults.map((lead, i) => (
-                    <Card key={i} className="bg-capta-surface-low/30 border-white/5 p-4 group">
-                      <div className="flex justify-between items-start">
-                        <div className="space-y-1">
-                          <h4 className="text-xs font-space font-bold text-white uppercase truncate w-40">{lead.name}</h4>
-                          <div className="flex items-center gap-1 text-yellow-400 text-[10px]">
-                            <Star size={10} fill="currentColor" /> {lead.rating || '0'}
-                            <span className="text-slate-500 font-mono ml-1">({lead.reviews || '0'} avaliações)</span>
-                          </div>
-                        </div>
-                        <Button onClick={() => moveToCRM(lead, 'Maps')} size="sm" className="h-7 px-2 bg-capta-primary/10 text-capta-primary text-[8px] uppercase font-bold">
-                          Add CRM
-                        </Button>
+                {/* Painel Lateral: Stats + Terminal + Resultados */}
+                <div className="lg:col-span-4 flex flex-col gap-4 overflow-hidden">
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 gap-3 shrink-0">
+                    <Card className="bg-capta-surface-low border-white/5 p-4 rounded-none">
+                      <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest mb-1">Fila Global</div>
+                      <div className="text-2xl font-space font-bold text-capta-primary">{storedGmnLeads.length}</div>
+                    </Card>
+                    <Card className="bg-capta-surface-low border-white/5 p-4 rounded-none">
+                      <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest mb-1">Processando</div>
+                      <div className="text-2xl font-space font-bold text-white flex items-center gap-2">
+                        {isScanningMaps ? <Activity size={20} className="text-capta-primary animate-pulse" /> : <span className="text-slate-600">—</span>}
                       </div>
                     </Card>
-                  ))}
+                  </div>
+
+                  {/* Terminal de Logs */}
+                  <div className="bg-black/60 border border-white/5 flex flex-col overflow-hidden font-mono text-[9px] shrink-0" style={{height: '160px'}}>
+                    <div className="p-2 bg-white/5 border-b border-white/5 flex items-center gap-2 shrink-0">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                      <span className="text-slate-500 uppercase tracking-widest text-[8px]">Terminal Output</span>
+                      {isScanningMaps && <span className="text-capta-primary animate-pulse text-[8px] ml-auto">{mapsProgress.processed}/{mapsProgress.total}</span>}
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                      {mapsLogs.length === 0 ? (
+                        <div className="text-slate-700 italic">Pronto para receber dados...</div>
+                      ) : (
+                        mapsLogs.map((log, i) => (
+                          <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-slate-400'}`}>
+                            <span className="opacity-30 shrink-0">{new Date().toLocaleTimeString()}</span>
+                            <span className="truncate">{log.text}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tabela Leads Qualificados GMN */}
+                  <div className="flex-1 bg-capta-surface-low/40 border border-white/5 overflow-hidden flex flex-col min-h-0">
+                    <div className="p-3 bg-white/5 border-b border-white/5 text-[9px] font-space uppercase tracking-widest text-slate-400 flex justify-between shrink-0">
+                      <span>Leads Qualificados Maps</span>
+                      <span className="text-capta-primary">Live Sync</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                      {storedGmnLeads.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center opacity-20 gap-2">
+                          <Database size={32} />
+                          <span className="text-[8px] font-space uppercase">Sem dados extraídos</span>
+                        </div>
+                      ) : (
+                        <table className="w-full text-left border-collapse">
+                          <tbody className="divide-y divide-white/5 font-space text-[10px]">
+                            {storedGmnLeads.map((lead, i) => (
+                              <tr key={i} className="hover:bg-capta-primary/5 transition-colors group">
+                                <td className="p-3">
+                                  <div className="font-bold text-white uppercase truncate w-36 group-hover:text-capta-primary transition-colors">{lead.name}</div>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-yellow-400 text-[8px] flex items-center gap-1">
+                                      <Star size={8} fill="currentColor" /> {lead.rating || '0'}
+                                    </span>
+                                    <span className="text-slate-600 text-[8px]">({lead.reviews || '0'} aval.)</span>
+                                  </div>
+                                  <div className="text-[8px] text-slate-500 truncate w-36 italic mt-0.5">{lead.site || lead.address || 'Sem site'}</div>
+                                </td>
+                                <td className="p-3 text-right">
+                                  <Button onClick={() => moveToCRM(lead, 'Maps')}
+                                    className="h-7 w-7 p-0 bg-capta-primary/10 text-capta-primary border border-capta-primary/20 hover:bg-capta-primary hover:text-capta-bg transition-all">
+                                    <ArrowRight size={14} />
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+
                 </div>
-              )}
-              {mapsScanResults.length === 0 && !isScanningMaps && (
-                <div className="text-center py-6 text-slate-700 font-space text-[11px] uppercase tracking-widest">
-                  Nenhum resultado ainda — configure os filtros e clique em Cloud Mining ou Local Injector
-                </div>
-              )}
+              </div>
             </div>
           )}
 
