@@ -161,6 +161,10 @@ function AuthenticatedApp({ user, onLogout }) {
   const [isLoadingQr, setIsLoadingQr] = useState(false);
   const [waSelectedList, setWaSelectedList] = useState('qualificado');
   const waQrPollRef = useRef(null);
+  // States Abordagem Rápida (modal do card)
+  const [waCardCheck, setWaCardCheck] = useState(null); // null | 'checking' | {exists, jid, formattedPhone} | 'error'
+  const [waCardMsg, setWaCardMsg] = useState('');
+  const [waCardSending, setWaCardSending] = useState(false);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -460,6 +464,38 @@ function AuthenticatedApp({ user, onLogout }) {
         } catch { clearInterval(poll); setIsSendingWA(false); }
       }, 2000);
     } catch (err) { setIsSendingWA(false); setWaLogs([{ type: 'error', text: `[💥] ${err.message}` }]); }
+  };
+  const handleCheckWaNumber = async (phone) => {
+    setWaCardCheck('checking');
+    try {
+      const r = await fetch(`${apiKeys.backend}/api/whatsapp/check-number`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+      const data = await r.json();
+      setWaCardCheck(data.error ? 'error' : data);
+    } catch { setWaCardCheck('error'); }
+  };
+
+  const handleSendWaSingle = async (lead) => {
+    if (!waCardCheck?.exists || waCardSending) return;
+    setWaCardSending(true);
+    try {
+      const r = await fetch(`${apiKeys.backend}/api/whatsapp/send-single`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: waCardCheck.formattedPhone, message: waCardMsg })
+      });
+      const data = await r.json();
+      if (data.success) {
+        await updateLead({ id: lead._id || lead.id, status: 'contato' });
+        setEditingLead(null);
+        setWaCardCheck(null);
+        setWaCardMsg('');
+      } else {
+        alert(`Erro ao enviar: ${data.error}`);
+      }
+    } catch (e) { alert(`Erro: ${e.message}`); }
+    finally { setWaCardSending(false); }
   };
   // FIM Evolution API funções
 
@@ -1009,7 +1045,7 @@ function AuthenticatedApp({ user, onLogout }) {
                                  </a>
                                )}
                              </div>
-                             <Button onClick={(e) => { e.stopPropagation(); setEditingLead(lead); }} variant="ghost" size="sm" className="h-6 px-2 text-[9px] uppercase hover:bg-white/5 border border-transparent hover:border-white/10">Ficha</Button>
+                             <Button onClick={(e) => { e.stopPropagation(); setEditingLead(lead); setWaCardCheck(null); setWaCardMsg(''); }} variant="ghost" size="sm" className="h-6 px-2 text-[9px] uppercase hover:bg-white/5 border border-transparent hover:border-white/10">Ficha</Button>
                           </div>
                         </div>
                       ))
@@ -1232,6 +1268,57 @@ function AuthenticatedApp({ user, onLogout }) {
                         <Input value={editingLead.socio} onChange={e => setEditingLead({...editingLead, socio: e.target.value})} placeholder="Ex: João da Silva" className="bg-black/20 border-white/5" />
                       </div>
                     </div>
+
+                    {/* Abordagem Rápida WhatsApp — ADITIVO */}
+                    <div className="border border-emerald-500/15 rounded-xl bg-emerald-950/20 p-5 space-y-4">
+                      <div className="flex items-center gap-2 text-emerald-300 font-bold font-space text-sm">
+                        <Send size={16} className="text-emerald-400"/> Abordagem Rápida NSTI
+                      </div>
+
+                      {/* Telefone + Validar */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-black/30 border border-white/10 px-3 py-2 rounded text-white font-mono text-sm">
+                          {editingLead.contact || <span className="text-slate-600 italic text-xs">Sem telefone cadastrado</span>}
+                        </div>
+                        <button
+                          onClick={() => { setWaCardCheck(null); handleCheckWaNumber(editingLead.contact); }}
+                          disabled={!editingLead.contact || waCardCheck === 'checking'}
+                          className="px-4 py-2 rounded bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/30 text-cyan-300 font-space text-[10px] uppercase tracking-widest font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+                        >
+                          {waCardCheck === 'checking' ? <><Activity className="animate-spin" size={12}/> Validando...</> : 'Validar WhatsApp'}
+                        </button>
+                      </div>
+
+                      {/* Badge resultado */}
+                      {waCardCheck && waCardCheck !== 'checking' && (
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded text-[11px] font-mono font-bold ${waCardCheck === 'error' ? 'bg-red-950/40 border border-red-500/20 text-red-400' : waCardCheck.exists ? 'bg-emerald-950/40 border border-emerald-500/20 text-emerald-400' : 'bg-red-950/40 border border-red-500/20 text-red-400'}`}>
+                          {waCardCheck === 'error' ? '⚠️ Evolution API offline' : waCardCheck.exists ? `✅ WhatsApp Confirmado — ${waCardCheck.formattedPhone}` : '❌ Número Sem WhatsApp Ativo'}
+                        </div>
+                      )}
+
+                      {/* Editor de mensagem — só mostra se número válido */}
+                      {waCardCheck?.exists && (
+                        <>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Mensagem Personalizada</label>
+                            <textarea
+                              value={waCardMsg || waMessage.replace(/\[NOME\]/gi, (editingLead.name || '').split(' ')[0])}
+                              onChange={e => setWaCardMsg(e.target.value)}
+                              rows={4}
+                              className="w-full bg-black/30 border border-white/10 p-3 text-white font-space text-xs outline-none focus:border-emerald-500/40 transition-all resize-none rounded"
+                            />
+                          </div>
+                          <button
+                            onClick={() => handleSendWaSingle(editingLead)}
+                            disabled={waCardSending}
+                            className={`w-full h-11 rounded font-space font-bold uppercase tracking-[0.15em] text-xs transition-all flex items-center justify-center gap-2 ${waCardSending ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-emerald-600/25 hover:bg-emerald-600/35 border border-emerald-500/30 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.1)]'}`}
+                          >
+                            {waCardSending ? <><Activity className="animate-spin" size={14}/> Enviando...</> : <><Send size={14}/> Disparar e Mover para Em Contato</>}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {/* FIM Abordagem Rápida */}
 
                     {/* Links e Anexos */}
                     {(editingLead.instagram || editingLead.site || editingLead.linkedin || editingLead.mapsUrl) && (

@@ -1062,6 +1062,50 @@ app.post('/api/whatsapp/send', async (req, res) => {
     job.logs.push({ type: 'info', text: `[🏁] Campanha finalizada. ${job.processed}/${job.total} processados.` });
   })();
 });
+// POST /api/whatsapp/check-number — Validação individual anti-spam
+app.post('/api/whatsapp/check-number', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Telefone não informado.' });
+
+  let clean = String(phone).replace(/\D/g, '');
+  if (!clean.startsWith('55')) clean = '55' + clean;
+
+  try {
+    const r = await axios.post(
+      `${EVO_URL}/chat/whatsappNumbers/${EVO_INST}`,
+      { numbers: [clean] },
+      { headers: evoHeaders(), timeout: 10000 }
+    );
+    const result = r.data?.[0] || r.data?.find?.(n => n);
+    const exists = result?.exists ?? result?.numberExists ?? false;
+    const jid = result?.jid || result?.remoteJid || clean + '@s.whatsapp.net';
+    const formattedPhone = result?.number || clean;
+    res.json({ exists, jid, formattedPhone });
+  } catch (e) {
+    res.status(503).json({ error: 'Evolution API offline ou número inválido.', exists: false });
+  }
+});
+
+// POST /api/whatsapp/send-single — Disparo individual (Abordagem Rápida)
+app.post('/api/whatsapp/send-single', async (req, res) => {
+  const { phone, message } = req.body;
+  if (!phone || !message) return res.status(400).json({ error: 'Telefone e mensagem são obrigatórios.' });
+
+  let clean = String(phone).replace(/\D/g, '');
+  if (!clean.startsWith('55')) clean = '55' + clean;
+
+  try {
+    await axios.post(
+      `${EVO_URL}/message/sendText/${EVO_INST}`,
+      { number: clean, text: message },
+      { headers: evoHeaders(), timeout: 15000 }
+    );
+    res.json({ success: true, phone: clean });
+  } catch (e) {
+    const detail = e.response?.data?.message || e.message;
+    res.status(500).json({ success: false, error: detail });
+  }
+});
 // ============================================================
 // FIM — EVOLUTION API WHATSAPP
 // ============================================================
