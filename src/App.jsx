@@ -77,6 +77,7 @@ function AuthenticatedApp({ user, onLogout }) {
   const [filtrosMaps, setFiltrosMaps] = useState({ keyword: '', location: '' });
   const [isScanningMaps, setIsScanningMaps] = useState(false);
   const [mapsLogs, setMapsLogs] = useState([]);
+  const [mapsScanResults, setMapsScanResults] = useState([]);
   const [mapsProgress, setMapsProgress] = useState({ processed: 0, total: 0 });
 
   // API Keys (Persistência no LocalStorage)
@@ -329,6 +330,7 @@ function AuthenticatedApp({ user, onLogout }) {
   const handleStartMapsScan = async (mode) => {
     setIsScanningMaps(true);
     setMapsLogs([]);
+    setMapsScanResults([]);
     const endpoint = mode === 'Cloud' ? '/api/hunter/gmn_api' : '/api/hunter/gmn';
     try {
       const res = await fetch(`${apiKeys.backend}${endpoint}`, {
@@ -347,6 +349,23 @@ function AuthenticatedApp({ user, onLogout }) {
           if (job.status === 'idle' || job.status === 'error') {
             clearInterval(poll);
             setIsScanningMaps(false);
+            if (job.results && job.results.length > 0) {
+              const normalized = job.results.map(l => ({
+                ...l,
+                name: l.name || l["Nome Empresa"] || 'SEM NOME',
+                phone: l.phone || l["Telefone 1"] || '',
+                rating: l.rating || l["Nota"] || '0',
+                reviews: l.reviews || l["Avaliações"] || '0',
+                address: l.address || l["Endereço"] || '',
+                site: l.site || l["Site"] || '',
+                instagram: l.instagram || l["Instagram"] || '',
+                mapsUrl: l.mapsUrl || l["Google Maps"] || '',
+                socio: l.socio || l["Decisor"] || '',
+                email: l.email || l["E-mail"] || '',
+                origin: 'Google Maps'
+              }));
+              setMapsScanResults(normalized);
+            }
           }
         } catch (e) {
           clearInterval(poll);
@@ -906,10 +925,19 @@ function AuthenticatedApp({ user, onLogout }) {
 
               <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-0">
                 <div className="lg:col-span-2 bg-black/40 border border-white/5 relative group">
-                  <iframe 
-                    src={`https://www.google.com/maps?q=${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}&output=embed`}
-                    className="w-full h-full border-none grayscale-[0.3] opacity-60 group-hover:opacity-100 transition-opacity"
-                  />
+                  {(filtrosMaps.keyword || filtrosMaps.location) ? (
+                    <iframe
+                      src={`https://www.google.com/maps?q=${encodeURIComponent(filtrosMaps.keyword + ' em ' + filtrosMaps.location)}&output=embed`}
+                      className="w-full h-full border-none grayscale-[0.3] opacity-60 group-hover:opacity-100 transition-opacity"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <div className="text-center space-y-2 opacity-30">
+                        <MapPin size={32} className="text-capta-primary mx-auto" />
+                        <p className="text-[11px] font-space uppercase tracking-widest text-slate-500">Digite Localização e Nicho para ativar o mapa</p>
+                      </div>
+                    </div>
+                  )}
                   <div className="absolute top-4 left-4 p-3 bg-capta-bg/90 border border-capta-primary/30 backdrop-blur-md">
                     <div className="text-[10px] font-mono text-capta-primary flex items-center gap-2">
                       <Activity size={12} className="animate-pulse" />
@@ -919,27 +947,32 @@ function AuthenticatedApp({ user, onLogout }) {
                 </div>
               </div>
 
-
-
-              {/* LISTA DE RESULTADOS MAPS */}
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pb-10">
-                {leads.filter(l => l.origin.includes('Maps')).map((lead, i) => (
-                  <Card key={i} className="bg-capta-surface-low/30 border-white/5 p-4 group">
-                    <div className="flex justify-between items-start">
-                      <div className="space-y-1">
-                        <h4 className="text-xs font-space font-bold text-white uppercase truncate w-40">{lead.name}</h4>
-                        <div className="flex items-center gap-1 text-yellow-400 text-[10px]">
-                          <Star size={10} fill="currentColor" /> {lead.nota || '0'} 
-                          <span className="text-slate-500 font-mono ml-1">({lead.avaliacoes || '0'} avaliações)</span>
+              {/* LISTA DE RESULTADOS MAPS — só após scan */}
+              {mapsScanResults.length > 0 && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pb-10">
+                  {mapsScanResults.map((lead, i) => (
+                    <Card key={i} className="bg-capta-surface-low/30 border-white/5 p-4 group">
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-1">
+                          <h4 className="text-xs font-space font-bold text-white uppercase truncate w-40">{lead.name}</h4>
+                          <div className="flex items-center gap-1 text-yellow-400 text-[10px]">
+                            <Star size={10} fill="currentColor" /> {lead.rating || '0'}
+                            <span className="text-slate-500 font-mono ml-1">({lead.reviews || '0'} avaliações)</span>
+                          </div>
                         </div>
+                        <Button onClick={() => moveToCRM(lead, 'Maps')} size="sm" className="h-7 px-2 bg-capta-primary/10 text-capta-primary text-[8px] uppercase font-bold">
+                          Add CRM
+                        </Button>
                       </div>
-                      <Button onClick={() => moveToCRM(lead, 'Maps')} size="sm" className="h-7 px-2 bg-capta-primary/10 text-capta-primary text-[8px] uppercase font-bold">
-                        Add CRM
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+              {mapsScanResults.length === 0 && !isScanningMaps && (
+                <div className="text-center py-6 text-slate-700 font-space text-[11px] uppercase tracking-widest">
+                  Nenhum resultado ainda — configure os filtros e clique em Cloud Mining ou Local Injector
+                </div>
+              )}
             </div>
           )}
 
