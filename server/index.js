@@ -978,6 +978,94 @@ app.post('/api/mine/casadosdados', async (req, res) => {
   }
 });
 
+// ============================================================
+// EVOLUTION API — WHATSAPP (VPS-READY, ADITIVO, NÃO INTERFERE)
+// ============================================================
+const EVO_URL  = (process.env.EVOLUTION_API_URL  || 'http://localhost:8080').replace(/\/$/, '');
+const EVO_KEY  = process.env.EVOLUTION_API_KEY   || 'nsti_master_key_free_99';
+const EVO_INST = process.env.EVOLUTION_INSTANCE_NAME || 'capta_instance';
+const evoHeaders = () => ({ 'Content-Type': 'application/json', 'apikey': EVO_KEY });
+
+// GET /api/whatsapp/status
+app.get('/api/whatsapp/status', async (req, res) => {
+  try {
+    const r = await axios.get(`${EVO_URL}/instance/connectionState/${EVO_INST}`, { headers: evoHeaders(), timeout: 8000 });
+    const state = r.data?.instance?.state || r.data?.state || 'close';
+    res.json({ state, connected: state === 'open', label: state === 'open' ? 'Conectado e Ativo' : state === 'connecting' ? 'Conectando...' : 'Desconectado' });
+  } catch (e) {
+    res.json({ state: 'close', connected: false, label: 'Desconectado', error: e.message });
+  }
+});
+
+// GET /api/whatsapp/qr
+app.get('/api/whatsapp/qr', async (req, res) => {
+  try {
+    // Tenta conectar/criar instância para gerar QR
+    let connectRes;
+    try {
+      connectRes = await axios.get(`${EVO_URL}/instance/connect/${EVO_INST}`, { headers: evoHeaders(), timeout: 10000 });
+    } catch (e) {
+      // Se instância não existe, cria ela primeiro
+      await axios.post(`${EVO_URL}/instance/create`, { instanceName: EVO_INST, qrcode: true, integration: 'WHATSAPP-BAILEYS' }, { headers: evoHeaders(), timeout: 10000 }).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+      connectRes = await axios.get(`${EVO_URL}/instance/connect/${EVO_INST}`, { headers: evoHeaders(), timeout: 10000 });
+    }
+    const qrCode = connectRes.data?.base64 || connectRes.data?.qrcode?.base64 || connectRes.data?.code || null;
+    if (!qrCode) return res.status(503).json({ error: 'QR Code não disponível. Verifique se a Evolution API está rodando.' });
+    res.json({ qrCode });
+  } catch (e) {
+    res.status(503).json({ error: 'Evolution API offline. Configure EVOLUTION_API_URL no .env.' });
+  }
+});
+
+// POST /api/whatsapp/send
+app.post('/api/whatsapp/send', async (req, res) => {
+  const { leads, messageTemplate } = req.body;
+  if (!leads || leads.length === 0) return res.status(400).json({ error: 'Nenhum lead informado.' });
+
+  const jobId = `wa_${Date.now()}`;
+  JOBS[jobId] = { status: 'running', processed: 0, total: leads.length, results: [], logs: [] };
+  res.json({ job_id: jobId });
+
+  (async () => {
+    const job = JOBS[jobId];
+    job.logs.push({ type: 'info', text: `[📡] Evolution API: iniciando ${leads.length} disparos...` });
+
+    for (const lead of leads) {
+      // Formatar telefone: remover tudo que não é dígito, garantir DDI 55
+      let rawPhone = String(lead.contact || lead.phone || '').replace(/\D/g, '');
+      if (!rawPhone) {
+        job.processed++;
+        job.logs.push({ type: 'error', text: `[⚠️] ${lead.name}: sem telefone, pulado.` });
+        continue;
+      }
+      if (!rawPhone.startsWith('55')) rawPhone = '55' + rawPhone;
+
+      const msg = (messageTemplate || '').replace(/\[NOME\]/gi, (lead.name || '').split(' ')[0]);
+      try {
+        await axios.post(
+          `${EVO_URL}/message/sendText/${EVO_INST}`,
+          { number: rawPhone, text: msg },
+          { headers: evoHeaders(), timeout: 15000 }
+        );
+        job.logs.push({ type: 'success', text: `[✅] Enviado: ${lead.name} (${rawPhone})` });
+      } catch (e) {
+        const detail = e.response?.data?.message || e.message;
+        job.logs.push({ type: 'error', text: `[❌] Falha ${lead.name}: ${detail}` });
+      }
+      job.processed++;
+      // Delay anti-bloqueio: 10s entre mensagens
+      if (job.processed < leads.length) await new Promise(r => setTimeout(r, 10000));
+    }
+
+    job.status = 'idle';
+    job.logs.push({ type: 'info', text: `[🏁] Campanha finalizada. ${job.processed}/${job.total} processados.` });
+  })();
+});
+// ============================================================
+// FIM — EVOLUTION API WHATSAPP
+// ============================================================
+
 try {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[CAPTA-NC] Backend Master rodando na porta ${PORT}`);

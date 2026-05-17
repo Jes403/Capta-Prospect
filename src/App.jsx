@@ -155,6 +155,12 @@ function AuthenticatedApp({ user, onLogout }) {
   const [waMessage, setWaMessage] = useState("Olá [NOME], vi que sua empresa está crescendo e gostaria de apresentar nossas soluções de TI e Segurança Eletrônica da NSTI. Podemos conversar?");
   const [waLogs, setWaLogs] = useState([]);
   const [isSendingWA, setIsSendingWA] = useState(false);
+  // States Evolution API (aditivo)
+  const [waStatus, setWaStatus] = useState({ state: 'close', connected: false, label: 'Desconectado' });
+  const [waQrCode, setWaQrCode] = useState(null);
+  const [isLoadingQr, setIsLoadingQr] = useState(false);
+  const [waSelectedList, setWaSelectedList] = useState('qualificado');
+  const waQrPollRef = useRef(null);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -392,6 +398,70 @@ function AuthenticatedApp({ user, onLogout }) {
       setWaLogs(prev => [...prev, { type: 'error', text: `[💥] Erro ao conectar com o servidor: ${err.message}` }]);
     }
   };
+
+  // Evolution API — funções (aditivo, não interferem em nada existente)
+  const fetchWaStatus = React.useCallback(async () => { // eslint-disable-line react-hooks/exhaustive-deps
+    if (!apiKeys.backend) return;
+    try {
+      const r = await fetch(`${apiKeys.backend}/api/whatsapp/status`);
+      if (!r.ok) return;
+      const data = await r.json();
+      setWaStatus(data);
+      if (data.connected && waQrPollRef.current) {
+        clearInterval(waQrPollRef.current);
+        waQrPollRef.current = null;
+        setWaQrCode(null);
+      }
+    } catch {}
+  }, [apiKeys.backend]);
+
+  const fetchWaQr = async () => {
+    setIsLoadingQr(true);
+    setWaQrCode(null);
+    try {
+      const r = await fetch(`${apiKeys.backend}/api/whatsapp/qr`);
+      const data = await r.json();
+      if (data.qrCode) {
+        setWaQrCode(data.qrCode);
+        // Polling para detectar conexão após escanear
+        if (waQrPollRef.current) clearInterval(waQrPollRef.current);
+        waQrPollRef.current = setInterval(fetchWaStatus, 4000);
+      } else {
+        alert(data.error || 'Não foi possível gerar QR Code.');
+      }
+    } catch (e) {
+      alert('Evolution API offline. Verifique se está rodando na VPS ou localmente.');
+    } finally {
+      setIsLoadingQr(false);
+    }
+  };
+
+  const handleStartWaCampaign = async () => {
+    const listMap = { qualificado: 'qualificado', contato: 'contato', all: null };
+    const filter = listMap[waSelectedList];
+    const targetLeads = filter ? leads.filter(l => l.status === filter) : leads;
+    if (targetLeads.length === 0) { alert('Nenhum lead na lista selecionada.'); return; }
+    setIsSendingWA(true);
+    setWaLogs([{ type: 'info', text: `[📡] Iniciando campanha para ${targetLeads.length} leads...` }]);
+    try {
+      const res = await fetch(`${apiKeys.backend}/api/whatsapp/send`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leads: targetLeads, messageTemplate: waMessage })
+      });
+      const { job_id } = await res.json();
+      const poll = setInterval(async () => {
+        try {
+          const s = await fetch(`${apiKeys.backend}/api/hunter/status/${job_id}`);
+          if (!s.ok) return;
+          const job = await s.json();
+          setWaLogs(job.logs || []);
+          setWaProgress({ processed: job.processed, total: job.total });
+          if (job.status === 'idle' || job.status === 'error') { clearInterval(poll); setIsSendingWA(false); }
+        } catch { clearInterval(poll); setIsSendingWA(false); }
+      }, 2000);
+    } catch (err) { setIsSendingWA(false); setWaLogs([{ type: 'error', text: `[💥] ${err.message}` }]); }
+  };
+  // FIM Evolution API funções
 
   const moveToCRM = async (lead, origin = 'Receita', targetStatus = 'leads') => {
     try {
@@ -952,82 +1022,128 @@ function AuthenticatedApp({ user, onLogout }) {
             </div>
           )}
 
-          {/* WHATSAPP */}
+          {/* WHATSAPP — Evolution API Premium Panel */}
           {activeTab === 'whatsapp' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-500">
-               <Card className="bg-capta-surface-low/50 border-white/5 backdrop-blur-md p-8 h-fit">
-                  <div className="space-y-6">
-                     <div className="space-y-2">
-                        <h2 className="text-2xl font-space font-bold uppercase text-white tracking-widest">Disparos Estratégicos</h2>
-                        <p className="text-xs text-slate-500 font-mono italic">Atenção: O disparo em massa requer que o WhatsApp Web esteja conectado no navegador que o robô abrirá.</p>
-                     </div>
-                     
-                     <div className="space-y-4">
-                        <div className="space-y-2">
-                           <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Selecione a Lista de Destino</label>
-                           <select className="w-full h-11 bg-capta-surface-lowest border border-white/10 px-4 text-white font-space text-sm outline-none focus:border-capta-primary transition-colors">
-                              <option>Leads Qualificados ({leads.filter(l => l.status === 'qualificado').length})</option>
-                              <option>Em Contato ({leads.filter(l => l.status === 'contato').length})</option>
-                              <option>Toda a Base ({leads.length})</option>
-                           </select>
-                        </div>
+            <div className="space-y-6 animate-in fade-in duration-500">
 
-                        <div className="space-y-2">
-                           <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Template da Mensagem (Use [NOME])</label>
-                           <textarea 
-                              value={waMessage}
-                              onChange={(e) => setWaMessage(e.target.value)}
-                              className="w-full h-48 bg-capta-surface-lowest border border-white/10 p-4 text-white font-space text-sm outline-none focus:border-capta-primary transition-all resize-none"
-                              placeholder="Digite sua mensagem aqui..."
-                           />
-                        </div>
-                     </div>
+              {/* Status Card */}
+              <div className={`flex items-center justify-between px-6 py-4 rounded-xl border ${waStatus.connected ? 'bg-emerald-950/40 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'bg-slate-900/60 border-white/5'}`}>
+                <div className="flex items-center gap-3">
+                  <span className={`w-3 h-3 rounded-full ${waStatus.connected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse' : 'bg-red-500'}`}></span>
+                  <span className="font-space text-sm font-bold uppercase tracking-widest text-white">{waStatus.label}</span>
+                  {waStatus.connected && <span className="text-[10px] font-mono text-emerald-400/70 border border-emerald-500/20 px-2 py-0.5 rounded">Evolution API • Ativo</span>}
+                </div>
+                <button onClick={fetchWaStatus} className="text-[10px] font-space uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors px-3 py-1 border border-white/5 rounded hover:border-white/10">
+                  Verificar
+                </button>
+              </div>
 
-                     <Button 
-                        onClick={handleStartWhatsAppSequence}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                {/* Coluna Esquerda — QR Code ou Painel de Campanha */}
+                <Card className="bg-capta-surface-low/50 border-white/5 backdrop-blur-md p-6 space-y-5">
+
+                  {!waStatus.connected ? (
+                    /* QR Code Section */
+                    <div className="space-y-5">
+                      <div>
+                        <h2 className="text-lg font-space font-bold uppercase text-white tracking-widest">Conectar WhatsApp</h2>
+                        <p className="text-[11px] text-slate-500 font-mono mt-1">Gere o QR Code e escaneie com seu celular para vincular a instância.</p>
+                      </div>
+                      {waQrCode ? (
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="p-3 bg-white rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.2)]">
+                            <img src={waQrCode.startsWith('data:') ? waQrCode : `data:image/png;base64,${waQrCode}`} alt="QR Code WhatsApp" className="w-52 h-52" />
+                          </div>
+                          <p className="text-[11px] text-cyan-400/80 font-mono animate-pulse text-center">Aguardando leitura... verificando a cada 4s</p>
+                          <button onClick={() => { if (waQrPollRef.current) clearInterval(waQrPollRef.current); setWaQrCode(null); }} className="text-[10px] font-space uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors">
+                            Cancelar
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={fetchWaQr}
+                          disabled={isLoadingQr}
+                          className="w-full h-14 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/30 hover:border-cyan-400/50 text-cyan-300 font-space font-bold uppercase tracking-[0.15em] text-sm rounded-lg transition-all shadow-[0_0_20px_rgba(6,182,212,0.1)] hover:shadow-[0_0_25px_rgba(6,182,212,0.2)] flex items-center justify-center gap-2"
+                        >
+                          {isLoadingQr ? <><Activity className="animate-spin" size={16} /> Gerando QR...</> : <><Send size={16} /> Gerar QR Code de Conexão</>}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    /* Campanha Section — só aparece quando conectado */
+                    <div className="space-y-5">
+                      <div>
+                        <h2 className="text-lg font-space font-bold uppercase text-white tracking-widest">Disparos Estratégicos</h2>
+                        <p className="text-[11px] text-emerald-400/70 font-mono mt-1">WhatsApp conectado via Evolution API.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Lista de Destino</label>
+                        <select
+                          value={waSelectedList}
+                          onChange={e => setWaSelectedList(e.target.value)}
+                          className="w-full h-10 bg-black/30 border border-white/10 px-3 text-white font-space text-sm outline-none focus:border-cyan-500/50 transition-colors rounded"
+                        >
+                          <option value="qualificado">Leads Qualificados ({leads.filter(l => l.status === 'qualificado').length})</option>
+                          <option value="contato">Em Contato ({leads.filter(l => l.status === 'contato').length})</option>
+                          <option value="all">Toda a Base ({leads.length})</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Template (use [NOME])</label>
+                        <textarea
+                          value={waMessage}
+                          onChange={e => setWaMessage(e.target.value)}
+                          className="w-full h-40 bg-black/30 border border-white/10 p-3 text-white font-space text-sm outline-none focus:border-cyan-500/50 transition-all resize-none rounded"
+                          placeholder="Olá [NOME], ..."
+                        />
+                      </div>
+
+                      <button
+                        onClick={handleStartWaCampaign}
                         disabled={isSendingWA}
-                        className={`w-full h-16 ${isSendingWA ? 'bg-slate-700' : 'bg-green-600 hover:bg-green-500'} text-white font-space font-bold py-6 uppercase tracking-[0.2em] shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all`}
-                     >
-                        {isSendingWA ? <Activity className="animate-spin mr-2" size={18} /> : <Send size={18} className="mr-2" />}
-                        {isSendingWA ? 'Processando Sequência...' : 'Iniciar Disparos em Massa'}
-                     </Button>
-                  </div>
-               </Card>
+                        className={`w-full h-14 font-space font-bold uppercase tracking-[0.15em] text-sm rounded-lg transition-all flex items-center justify-center gap-2 ${isSendingWA ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 hover:border-emerald-400/50 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.1)] hover:shadow-[0_0_25px_rgba(16,185,129,0.2)]'}`}
+                      >
+                        {isSendingWA ? <><Activity className="animate-spin" size={16} /> Enviando...</> : <><Send size={16} /> Iniciar Campanha</>}
+                      </button>
+                    </div>
+                  )}
+                </Card>
 
-               <div className="bg-capta-surface-low/30 border border-white/5 flex flex-col font-mono text-[11px] h-[calc(100vh-200px)] overflow-hidden rounded-xl">
+                {/* Coluna Direita — Console */}
+                <div className="bg-capta-surface-low/30 border border-white/5 flex flex-col font-mono text-[11px] h-[calc(100vh-320px)] min-h-[400px] overflow-hidden rounded-xl">
                   <div className="p-4 border-b border-white/5 bg-white/5 font-space uppercase tracking-[0.2em] text-slate-400 flex justify-between items-center">
                     <span>Console de Operações WA</span>
-                    {isSendingWA && <span className="text-[10px] text-green-400 animate-pulse">Robô Ativo</span>}
+                    {isSendingWA && <span className="text-[10px] text-emerald-400 animate-pulse">● Campanha Ativa</span>}
                   </div>
-                  
-                  <div className="flex-1 p-6 space-y-2 overflow-y-auto custom-scrollbar bg-black/20">
+                  <div className="flex-1 p-5 space-y-1.5 overflow-y-auto custom-scrollbar bg-black/20">
                     {waLogs.length === 0 ? (
-                      <div className="text-slate-700 italic">Aguardando comando para iniciar prospecção...</div>
+                      <div className="text-slate-700 italic">Aguardando comando...</div>
                     ) : (
                       waLogs.map((log, i) => (
-                        <div key={i} className={`flex gap-3 leading-relaxed ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-slate-300'}`}>
-                          <span className="opacity-20 shrink-0">[{new Date().toLocaleTimeString()}]</span>
+                        <div key={i} className={`flex gap-3 leading-relaxed ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                          <span className="opacity-30 shrink-0">[{new Date().toLocaleTimeString()}]</span>
                           <span className="break-all">{log.text}</span>
                         </div>
                       ))
                     )}
                   </div>
-
                   {isSendingWA && (
-                    <div className="p-6 border-t border-white/5 bg-white/5">
-                      <div className="flex justify-between mb-3">
-                        <span className="text-[10px] font-space uppercase tracking-widest text-green-400">Progresso da Campanha</span>
-                        <span className="font-mono">{waProgress.processed} / {waProgress.total}</span>
+                    <div className="p-4 border-t border-white/5 bg-white/5">
+                      <div className="flex justify-between mb-2">
+                        <span className="text-[10px] font-space uppercase tracking-widest text-cyan-400">Progresso</span>
+                        <span className="font-mono text-white">{waProgress.processed} / {waProgress.total}</span>
                       </div>
                       <div className="h-1.5 bg-white/5 w-full rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-green-500 transition-all duration-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" 
-                          style={{ width: `${(waProgress.processed / waProgress.total) * 100 || 0}%` }}
-                        ></div>
+                        <div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]"
+                          style={{ width: `${(waProgress.processed / waProgress.total) * 100 || 0}%` }} />
                       </div>
                     </div>
                   )}
-               </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1440,6 +1556,7 @@ function Sidebar({ activeTab, setActiveTab }) {
     { id: 'receita', label: 'Receita Federal', icon: Building2 },
     { id: 'maps', label: 'Google Maps', icon: MapPin },
     { id: 'crm', label: 'CRM Pipeline', icon: Users },
+    { id: 'whatsapp', label: 'WhatsApp Dispatch', icon: MessageSquare },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
   return (
