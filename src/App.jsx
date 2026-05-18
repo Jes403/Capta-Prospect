@@ -136,6 +136,7 @@ function AuthenticatedApp({ user, onLogout }) {
   const [crmColumns, setCrmColumns] = useState([
     { id: 'leads', title: 'Novos Leads', color: 'border-capta-primary' },
     { id: 'receita', title: 'RECEITA QUALIFICADA', color: 'border-blue-500' },
+    { id: 'maps_qualificado', title: 'MAPS QUALIFICADOS', color: 'border-amber-500' },
     { id: 'contato', title: 'Em Contato', color: 'border-yellow-500' },
     { id: 'qualificado', title: 'Qualificados', color: 'border-blue-500' },
     { id: 'fechamento', title: 'Fechamento', color: 'border-green-500' }
@@ -409,6 +410,26 @@ function AuthenticatedApp({ user, onLogout }) {
                 origin: 'Google Maps'
               }));
               setMapsScanResults(normalized);
+              // Envio automático ao CRM na coluna maps_qualificado
+              for (const lead of normalized) {
+                try {
+                  await createLead({
+                    name: lead.name,
+                    contact: lead.phone || lead.contact || '',
+                    email: lead.email || '',
+                    loc: lead.address || '',
+                    origin: 'Google Maps',
+                    status: 'maps_qualificado',
+                    site: lead.site || '',
+                    instagram: lead.instagram || '',
+                    linkedin: lead.linkedin || '',
+                    mapsUrl: lead.mapsUrl || '',
+                    socio: lead.socio || '',
+                    security_hook: lead.security_hook || false,
+                    cnpj: ''
+                  });
+                } catch (e) { console.error('[CRM Maps Auto]', e); }
+              }
             }
             fetchGmnLeads();
           }
@@ -1141,7 +1162,9 @@ function AuthenticatedApp({ user, onLogout }) {
                         >
                           <div className="flex justify-between items-start">
                             <span className={`text-[8px] font-space px-2 py-0.5 uppercase tracking-tighter rounded ${
-                              lead.origin === 'Receita' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-capta-primary/10 text-capta-primary border border-capta-primary/20'
+                              lead.origin === 'Receita' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                              lead.origin === 'Google Maps' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                              'bg-capta-primary/10 text-capta-primary border border-capta-primary/20'
                             }`}>
                               {lead.origin || 'MAPS'}
                             </span>
