@@ -69,6 +69,7 @@ function AuthenticatedApp({ user, onLogout }) {
   const [filtrosReceita, setFiltrosReceita] = useState({ uf: 'SP', cidade: '', bairro: '', cnae: '', segmento: '', niche: '' });
   const [receitaLimit, setReceitaLimit] = useState(100);
   const [receitaTotalCount, setReceitaTotalCount] = useState(null);
+  const [receitaCurrentOffset, setReceitaCurrentOffset] = useState(0);
   const [receitaResults, setReceitaResults] = useState([]);
   const [allReceitaLeads, setAllReceitaLeads] = useState([]);
   const [receitaPage, setReceitaPage] = useState(0);
@@ -205,6 +206,7 @@ function AuthenticatedApp({ user, onLogout }) {
     setAllReceitaLeads([]);
     setReceitaPage(0);
     setReceitaTotalCount(null);
+    setReceitaCurrentOffset(0);
 
     // Buscar total antes do scan para mostrar ao usuário
     try {
@@ -235,12 +237,51 @@ function AuthenticatedApp({ user, onLogout }) {
       setAllReceitaLeads(validLeads);
       setReceitaPage(0);
       setReceitaResults(validLeads.slice(0, 100));
+      setReceitaCurrentOffset(receitaLimit); // próximo lote começa aqui
       clearInterval(progressInterval);
       setReceitaProgress(100);
     } catch (err) {
       clearInterval(progressInterval);
       console.error("Erro na extração:", err);
       alert("Erro ao conectar com o motor backend. Verifique se ele está rodando na porta 3007.");
+    } finally {
+      setIsScanningReceita(false);
+    }
+  };
+
+  const handleNextBatch = async () => {
+    if (isScanningReceita) return;
+    setIsScanningReceita(true);
+    setReceitaProgress(0);
+
+    const progressInterval = setInterval(() => {
+      setReceitaProgress(prev => (prev < 90 ? prev + 3 : prev));
+    }, 400);
+
+    try {
+      const res = await fetch(`${apiKeys.backend}/api/receita/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...filtrosReceita, limit: receitaLimit, offset: receitaCurrentOffset })
+      });
+      const data = await res.json();
+
+      const validLeads = (data.leads || [])
+        .filter(l => l.name && l.name !== 'SEM NOME FANTASIA' && l.name !== 'EMPRESA SEM NOME');
+
+      if (validLeads.length === 0) {
+        alert('Não há mais leads novos para este filtro. Você chegou ao fim da base!');
+      } else {
+        setReceitaResults(validLeads.slice(0, 100));
+        setAllReceitaLeads(validLeads);
+        setReceitaPage(0);
+        setReceitaCurrentOffset(prev => prev + receitaLimit);
+      }
+      clearInterval(progressInterval);
+      setReceitaProgress(100);
+    } catch (err) {
+      clearInterval(progressInterval);
+      alert('Erro ao buscar próximo lote.');
     } finally {
       setIsScanningReceita(false);
     }
@@ -879,7 +920,7 @@ function AuthenticatedApp({ user, onLogout }) {
                       </div>
                     )}
                     
-                    <Button 
+                    <Button
                       onClick={() => handleStartReceitaScan()}
                       disabled={isScanningReceita}
                       size="lg"
@@ -889,6 +930,17 @@ function AuthenticatedApp({ user, onLogout }) {
                     >
                       {isScanningReceita ? 'EXTRAINDO...' : 'EXTRAIR BASE DE DADOS'}
                     </Button>
+
+                    {receitaCurrentOffset > 0 && !isScanningReceita && (
+                      <Button
+                        onClick={handleNextBatch}
+                        size="lg"
+                        title={`Buscar próximos ${receitaLimit} leads (offset ${receitaCurrentOffset})`}
+                        className="min-w-[150px] font-space font-bold uppercase tracking-[0.2em] text-[10px] bg-capta-primary/10 text-capta-primary border border-capta-primary/30 hover:bg-capta-primary/20"
+                      >
+                        Próximo Lote +{receitaLimit}
+                      </Button>
+                    )}
 
                     {receitaResults.length > 0 && !isScanningReceita && (
                       <div className="flex items-center gap-3">

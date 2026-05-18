@@ -596,7 +596,7 @@ app.post('/api/receita/scan', async (req, res) => {
             localParams.push(`%${upperSegmento}%`, `%${upperSegmento}%`);
         }
 
-        localSql += ` LIMIT ${scanLimit} OFFSET ${scanOffset}`;
+        localSql += ` ORDER BY id LIMIT ${scanLimit} OFFSET ${scanOffset}`;
         
         const localResult = db.prepare(localSql).all(...localParams);
         
