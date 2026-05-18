@@ -27,12 +27,12 @@ function LoginForm({ onLogin }) {
           </div>
           <div className="space-y-1">
             <CardTitle className="text-2xl font-space font-bold tracking-widest text-white">CAPTA PROSPECT</CardTitle>
-            <CardDescription className="text-xs font-space uppercase tracking-[0.3em] text-capta-primary">Intelligence Command</CardDescription>
+            <CardDescription className="text-xs font-space uppercase tracking-[0.3em] text-capta-primary">Centro de Inteligência</CardDescription>
           </div>
         </CardHeader>
         <CardContent className="space-y-6 p-8">
           <div className="space-y-2">
-            <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Access ID</label>
+            <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">ID de Acesso</label>
             <Input 
               className="h-12 bg-capta-surface-lowest border-white/5 font-space text-white"
               value={user.username}
@@ -40,7 +40,7 @@ function LoginForm({ onLogin }) {
             />
           </div>
           <div className="space-y-2">
-            <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Quantum Key</label>
+            <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Chave de Acesso</label>
             <Input 
               type="password"
               className="h-12 bg-capta-surface-lowest border-white/5 font-space text-white"
@@ -52,7 +52,7 @@ function LoginForm({ onLogin }) {
             className="w-full h-12 bg-capta-primary text-capta-bg font-space font-bold uppercase tracking-widest hover:shadow-[0_0_20px_rgba(47,217,244,0.4)] transition-all"
             onClick={() => onLogin(user)}
           >
-            Authenticate
+            Entrar
           </Button>
         </CardContent>
       </Card>
@@ -718,7 +718,7 @@ function AuthenticatedApp({ user, onLogout }) {
       <main className="flex-1 flex flex-col overflow-hidden relative">
         <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#2fd9f4 1px, transparent 1px)', backgroundSize: '32px 32px' }}></div>
         <Header 
-          title={activeTab === 'dashboard' ? 'Capta Command Center' : activeTab.replace('_', ' ')} 
+          title={activeTab === 'dashboard' ? 'Centro de Comando Capta' : activeTab.replace('_', ' ')} 
           onLogout={onLogout} 
           isBackendOnline={isBackendOnline}
         />
@@ -732,7 +732,7 @@ function AuthenticatedApp({ user, onLogout }) {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                  <div className="bg-capta-surface-low/20 border border-white/5 p-4 flex items-center justify-between">
                     <div className="space-y-1">
-                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">Network Latency</div>
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">Latência de Rede</div>
                        <div className={`text-xl font-space font-bold ${serverStats.latency < 100 ? 'text-green-400' : 'text-yellow-400'}`}>
                           {serverStats.latency}ms
                        </div>
@@ -741,7 +741,7 @@ function AuthenticatedApp({ user, onLogout }) {
                  </div>
                  <div className="bg-capta-surface-low/20 border border-white/5 p-4 flex items-center justify-between">
                     <div className="space-y-1">
-                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">Total Database Leads</div>
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">Total de Leads no Banco</div>
                        <div className="text-xl font-space font-bold text-white">
                           {(serverStats.dbCount / 1000000).toFixed(1)}M
                        </div>
@@ -750,7 +750,7 @@ function AuthenticatedApp({ user, onLogout }) {
                  </div>
                  <div className="bg-capta-surface-low/20 border border-white/5 p-4 flex items-center justify-between">
                     <div className="space-y-1">
-                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">System Engine Uptime</div>
+                       <div className="text-[9px] font-space text-slate-500 uppercase tracking-widest">Tempo de Atividade</div>
                        <div className="text-xl font-space font-bold text-white">
                           {(serverStats.uptime / 3600).toFixed(1)}h
                        </div>
@@ -773,7 +773,7 @@ function AuthenticatedApp({ user, onLogout }) {
                     </div>
                   </div>
                   <div className="flex flex-col items-center gap-4 bg-capta-surface-low/40 border border-capta-primary/30 p-6 backdrop-blur-xl">
-                     <div className="text-[10px] font-space text-capta-primary uppercase tracking-[0.3em] animate-pulse">Auto-Pilot Mode</div>
+                     <div className="text-[10px] font-space text-capta-primary uppercase tracking-[0.3em] animate-pulse">Modo Automático</div>
                      <Shield size={48} className="text-capta-primary" />
                      <Button 
                        onClick={() => {
@@ -791,7 +791,7 @@ function AuthenticatedApp({ user, onLogout }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 {[
                   { label: 'Leads no CRM', value: displayLeads.length, icon: BarChart },
-                  { label: 'Mineração Ativa', value: isScanningReceita || isScanningMaps ? 'ON' : 'IDLE', icon: Activity },
+                  { label: 'Mineração Ativa', value: isScanningReceita || isScanningMaps ? 'ATIVO' : 'OCIOSO', icon: Activity },
                   { label: 'Base Validada', value: displayLeads.filter(l => l.cnpj).length, icon: Database },
                 ].map((stat, i) => {
                   const StatIcon = stat.icon;
@@ -815,7 +815,7 @@ function AuthenticatedApp({ user, onLogout }) {
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
                       <CardTitle className="text-sm font-space uppercase tracking-[0.3em] flex items-center gap-3 text-capta-primary">
-                        <Database size={18} /> Deep Data Mining
+                        <Database size={18} /> Mineração de Dados
                       </CardTitle>
                       <CardDescription className="text-xs text-slate-500 font-mono">
                         Inteligência Artificial aplicada à base da Receita Federal
@@ -1015,13 +1015,13 @@ function AuthenticatedApp({ user, onLogout }) {
                              {lead.instagram && (
                              <div className="flex items-center gap-2 text-[10px] text-pink-500/70">
                                <Instagram size={12} />
-                               Instagram OK
+                               Instagram ✓
                              </div>
                            )}
                            {lead.site && (
                              <div className="flex items-center gap-2 text-[10px] text-blue-500/70">
                                <Globe size={12} />
-                               Site OK
+                               Site ✓
                              </div>
                            )}
                            {!lead.qualified ? (
@@ -1080,11 +1080,11 @@ function AuthenticatedApp({ user, onLogout }) {
                 <div className="flex items-center gap-4 flex-wrap">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-capta-primary animate-pulse"></div>
-                    <span className="text-[10px] font-space uppercase tracking-widest text-capta-primary font-bold">GMN Hybrid Engine v4.0</span>
+                    <span className="text-[10px] font-space uppercase tracking-widest text-capta-primary font-bold">Motor GMN Híbrido v4.0</span>
                   </div>
                   <div className="h-4 w-[1px] bg-white/10 hidden lg:block"></div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest hidden lg:block">Target:</span>
+                    <span className="text-[10px] font-space text-slate-500 uppercase tracking-widest hidden lg:block">Alvo:</span>
                     <Input value={filtrosMaps.location} onChange={(e) => setFiltrosMaps({...filtrosMaps, location: e.target.value})} placeholder="Ex: Rio de Janeiro, RJ" className="h-8 w-44 bg-black/20 border-white/5 font-space text-[10px]" />
                   </div>
                   <div className="flex items-center gap-2">
@@ -1105,10 +1105,10 @@ function AuthenticatedApp({ user, onLogout }) {
                     <Trash2 size={12} className="mr-1" /> Limpar
                   </Button>
                   <Button onClick={() => handleStartMapsScan('Cloud')} disabled={isScanningMaps} className="bg-capta-primary/10 text-capta-primary border border-capta-primary/20 text-[9px] font-space font-bold uppercase px-4 h-9">
-                    {isScanningMaps ? <Activity size={12} className="animate-spin mr-1" /> : null} Cloud Mining
+                    {isScanningMaps ? <Activity size={12} className="animate-spin mr-1" /> : null} Mineração Nuvem
                   </Button>
                   <Button onClick={() => handleStartMapsScan('Local')} disabled={isScanningMaps} className="bg-capta-primary text-capta-bg text-[9px] font-space font-bold uppercase px-4 h-9">
-                    Local Injector
+                    Injetor Local
                   </Button>
                 </div>
               </div>
@@ -1143,7 +1143,7 @@ function AuthenticatedApp({ user, onLogout }) {
                   )}
                   <div className="absolute top-12 left-4 p-2 bg-capta-bg/90 border border-capta-primary/30 backdrop-blur-md">
                     <div className="text-[9px] font-mono text-capta-primary flex items-center gap-2">
-                      <Activity size={10} className="animate-pulse" /> COORD_STREAM: ACTIVE
+                      <Activity size={10} className="animate-pulse" /> COORD_STREAM: ATIVO
                     </div>
                   </div>
                 </div>
@@ -1169,7 +1169,7 @@ function AuthenticatedApp({ user, onLogout }) {
                   <div className="bg-black/60 border border-white/5 flex flex-col overflow-hidden font-mono text-[9px] shrink-0" style={{height: '160px'}}>
                     <div className="p-2 bg-white/5 border-b border-white/5 flex items-center gap-2 shrink-0">
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                      <span className="text-slate-500 uppercase tracking-widest text-[8px]">Terminal Output</span>
+                      <span className="text-slate-500 uppercase tracking-widest text-[8px]">Saída do Terminal</span>
                       {isScanningMaps && <span className="text-capta-primary animate-pulse text-[8px] ml-auto">{mapsProgress.processed}/{mapsProgress.total}</span>}
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -1190,7 +1190,7 @@ function AuthenticatedApp({ user, onLogout }) {
                   <div className="flex-1 bg-capta-surface-low/40 border border-white/5 overflow-hidden flex flex-col min-h-0">
                     <div className="p-3 bg-white/5 border-b border-white/5 text-[9px] font-space uppercase tracking-widest text-slate-400 flex justify-between shrink-0">
                       <span>Leads Qualificados Maps</span>
-                      <span className="text-capta-primary">Live Sync</span>
+                      <span className="text-capta-primary">Sincronização ao Vivo</span>
                     </div>
                     <div className="flex-1 overflow-y-auto custom-scrollbar">
                       {storedGmnLeads.length === 0 ? (
@@ -1329,7 +1329,7 @@ function AuthenticatedApp({ user, onLogout }) {
                                    <Phone size={10} className="text-green-500/70" /> 
                                    <span className="font-mono text-white/90">{lead.contact}</span>
                                  </div>
-                                 <span className="text-[8px] bg-green-500/10 text-green-500 px-1.5 rounded">DIRECT</span>
+                                 <span className="text-[8px] bg-green-500/10 text-green-500 px-1.5 rounded">DIRETO</span>
                                </div>
                              )}
                              {lead.email && <div className="flex items-center gap-2 truncate"><Mail size={10} className="text-yellow-500/70" /> <span className="truncate text-white/80">{lead.email}</span></div>}
@@ -1443,7 +1443,7 @@ function AuthenticatedApp({ user, onLogout }) {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Template (use [NOME])</label>
+                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Mensagem (use [NOME])</label>
                         <textarea
                           value={waMessage}
                           onChange={e => setWaMessage(e.target.value)}
@@ -1771,7 +1771,7 @@ function AuthenticatedApp({ user, onLogout }) {
                       </Button>
                       
                       <Button onClick={() => { deleteLead({id: editingLead._id || editingLead.id}); setEditingLead(null); setAttachDropdown(false); }} variant="ghost" className="w-full justify-start gap-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/10 h-10 rounded uppercase tracking-widest text-[10px] mt-4">
-                        <Trash2 size={16}/> Excluir Card
+                        <Trash2 size={16}/> Excluir Cartão
                       </Button>
                     </div>
                   </div>
@@ -1954,12 +1954,12 @@ function Header({ title, onLogout, isBackendOnline }) {
 
 function Sidebar({ activeTab, setActiveTab }) {
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart },
+    { id: 'dashboard', label: 'Painel', icon: BarChart },
     { id: 'receita', label: 'Receita Federal', icon: Building2 },
     { id: 'maps', label: 'Google Maps', icon: MapPin },
-    { id: 'crm', label: 'CRM Pipeline', icon: Users },
-    { id: 'whatsapp', label: 'WhatsApp Dispatch', icon: MessageSquare },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'crm', label: 'Pipeline CRM', icon: Users },
+    { id: 'whatsapp', label: 'Disparos WhatsApp', icon: MessageSquare },
+    { id: 'settings', label: 'Configurações', icon: Settings },
   ];
   return (
     <aside className="w-64 border-r border-white/5 bg-capta-surface-lowest flex flex-col">

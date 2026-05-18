@@ -664,13 +664,20 @@ app.post('/api/receita/qualify', async (req, res) => {
         try {
           job.logs.push({ type: 'info', text: `[🔍] Analisando: ${lead.name}...` });
           const qualified = await qualifyLead(lead, job);
-          job.results.push(qualified);
+          if (qualified.site && qualified.site.length > 5) {
+            job.results.push(qualified);
+            job.logs.push({ type: 'success', text: `[✅] ${lead.name} — site encontrado, qualificado.` });
+          } else {
+            job.logs.push({ type: 'warning', text: `[🚫] ${lead.name} — nenhum site encontrado, descartado.` });
+          }
         } catch (e) {
-          job.logs.push({ type: 'error', text: `[❌] Erro em ${lead.name}: ${e.message}` });
+          job.logs.push({ type: 'warning', text: `[⚠️] Enriquecimento falhou para ${lead.name} — descartado.` });
         } finally {
           job.processed++;
         }
       }));
+      // Pausa entre lotes para evitar rate limiting do DuckDuckGo/Google
+      if (i + BATCH_SIZE < leads.length) await sleep(3000);
     }
 
     job.status = 'idle';
