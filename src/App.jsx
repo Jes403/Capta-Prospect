@@ -67,6 +67,8 @@ function AuthenticatedApp({ user, onLogout }) {
   
   // States para Receita
   const [filtrosReceita, setFiltrosReceita] = useState({ uf: 'SP', cidade: '', bairro: '', cnae: '', segmento: '', niche: '' });
+  const [receitaLimit, setReceitaLimit] = useState(100);
+  const [receitaTotalCount, setReceitaTotalCount] = useState(null);
   const [receitaResults, setReceitaResults] = useState([]);
   const [allReceitaLeads, setAllReceitaLeads] = useState([]);
   const [receitaPage, setReceitaPage] = useState(0);
@@ -202,8 +204,18 @@ function AuthenticatedApp({ user, onLogout }) {
     setReceitaResults([]);
     setAllReceitaLeads([]);
     setReceitaPage(0);
-    
-    // Simulação de progresso visual enquanto o fetch acontece
+    setReceitaTotalCount(null);
+
+    // Buscar total antes do scan para mostrar ao usuário
+    try {
+      const countRes = await fetch(`${apiKeys.backend}/api/receita/count`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filtros)
+      });
+      const countData = await countRes.json();
+      setReceitaTotalCount(countData.total || 0);
+    } catch {}
+
     const progressInterval = setInterval(() => {
        setReceitaProgress(prev => (prev < 90 ? prev + 2 : prev));
     }, 500);
@@ -212,11 +224,11 @@ function AuthenticatedApp({ user, onLogout }) {
       const res = await fetch(`${apiKeys.backend}/api/receita/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(filtros)
+        body: JSON.stringify({ ...filtros, limit: receitaLimit, offset: 0 })
       });
       const data = await res.json();
       console.log("[DEBUG] Receita Results:", data);
-      
+
       const validLeads = (data.leads || [])
         .filter(l => l.name && l.name !== 'SEM NOME FANTASIA' && l.name !== 'EMPRESA SEM NOME');
 
@@ -623,6 +635,28 @@ function AuthenticatedApp({ user, onLogout }) {
     await updateLead({ id, status: columnId });
   };
 
+  // Colunas fixas que não podem ser excluídas
+  const FIXED_COLUMNS = ['leads', 'receita', 'maps_qualificado', 'contato', 'qualificado', 'fechamento'];
+
+  const handleClearColumn = async (colId) => {
+    const colLeads = displayLeads.filter(l => l.status === colId);
+    if (colLeads.length === 0) return;
+    if (!confirm(`Excluir todos os ${colLeads.length} cards desta coluna? Esta ação não pode ser desfeita.`)) return;
+    for (const lead of colLeads) {
+      try { await deleteLead({ id: lead._id || lead.id }); } catch (e) {}
+    }
+  };
+
+  const handleDeleteColumn = (colId) => {
+    if (FIXED_COLUMNS.includes(colId)) return;
+    const colLeads = displayLeads.filter(l => l.status === colId);
+    const msg = colLeads.length > 0
+      ? `Esta coluna tem ${colLeads.length} cards. Excluir a coluna não remove os cards, apenas oculta a coluna. Continuar?`
+      : 'Excluir esta coluna?';
+    if (!confirm(msg)) return;
+    setCrmColumns(prev => prev.filter(c => c.id !== colId));
+  };
+
   const handleAddColumn = () => {
     const newId = `col_${Date.now()}`;
     setCrmColumns([...crmColumns, { id: newId, title: 'Nova Etapa', color: 'border-slate-500' }]);
@@ -786,6 +820,25 @@ function AuthenticatedApp({ user, onLogout }) {
                     <div className="space-y-2">
                       <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">Palavra-Chave</label>
                       <Input value={filtrosReceita.segmento} onChange={(e) => setFiltrosReceita({...filtrosReceita, segmento: e.target.value})} placeholder="Ex: PADARIA, CONSTRUTORA" className="h-11 bg-capta-surface-lowest border-white/5" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest ml-1">
+                        Quantidade de Leads
+                        {receitaTotalCount !== null && (
+                          <span className="ml-2 text-capta-primary font-mono">({receitaTotalCount.toLocaleString()} encontrados no banco)</span>
+                        )}
+                      </label>
+                      <select
+                        value={receitaLimit}
+                        onChange={e => setReceitaLimit(Number(e.target.value))}
+                        className="w-full h-11 bg-capta-surface-lowest border border-white/5 px-3 text-white font-space text-sm outline-none focus:border-capta-primary transition-colors rounded"
+                      >
+                        <option value={100}>100 leads</option>
+                        <option value={200}>200 leads</option>
+                        <option value={300}>300 leads</option>
+                        <option value={500}>500 leads (máximo)</option>
+                      </select>
                     </div>
                   </div>
 
@@ -1145,9 +1198,33 @@ function AuthenticatedApp({ user, onLogout }) {
                         {displayLeads.filter(l => l.status === col.id).length}
                       </span>
                     </div>
-                    <Button onClick={() => handleAddLeadManually(col.id)} size="icon" variant="ghost" className="h-7 w-7 text-slate-500 hover:text-capta-primary hover:bg-capta-primary/10">
-                      <Plus size={16} />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button onClick={() => handleAddLeadManually(col.id)} size="icon" variant="ghost" className="h-7 w-7 text-slate-500 hover:text-capta-primary hover:bg-capta-primary/10">
+                        <Plus size={16} />
+                      </Button>
+                      {/* Menu ⋯ da coluna */}
+                      <div className="relative group/menu">
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-slate-600 hover:text-slate-300 hover:bg-white/5">
+                          <span className="text-lg leading-none">⋯</span>
+                        </Button>
+                        <div className="absolute right-0 top-8 w-44 bg-capta-surface-low border border-white/10 shadow-2xl z-50 hidden group-hover/menu:flex flex-col py-1 rounded-lg">
+                          <button
+                            onClick={() => handleClearColumn(col.id)}
+                            className="flex items-center gap-2 px-4 py-2 text-[11px] font-space uppercase tracking-widest text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 size={12} /> Limpar Coluna
+                          </button>
+                          {!FIXED_COLUMNS.includes(col.id) && (
+                            <button
+                              onClick={() => handleDeleteColumn(col.id)}
+                              className="flex items-center gap-2 px-4 py-2 text-[11px] font-space uppercase tracking-widest text-slate-400 hover:bg-white/5 transition-colors"
+                            >
+                              <X size={12} /> Excluir Coluna
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
                     {displayLeads

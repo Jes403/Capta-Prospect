@@ -537,26 +537,49 @@ const NICHE_CONFIG = {
   }
 };
 
-app.post('/api/receita/scan', async (req, res) => {
+// GET /api/receita/count — retorna total de registros para os filtros (sem trazer dados)
+app.post('/api/receita/count', (req, res) => {
   const { uf, cidade, bairro, cnae, segmento } = req.body;
   try {
     const upperCidade = normalizeString(cidade);
     const upperBairro = normalizeString(bairro);
     const upperSegmento = normalizeString(segmento);
     const cityCode = SIAFI_CITIES[upperCidade] || null;
-    
+    let sql = "SELECT COUNT(*) as total FROM estabelecimentos WHERE 1=1";
+    const params = [];
+    if (uf) { sql += " AND uf = ?"; params.push(uf.toUpperCase()); }
+    if (cityCode) { sql += " AND municipio = ?"; params.push(cityCode); }
+    else if (upperCidade) { sql += " AND municipio LIKE ?"; params.push(`%${upperCidade}%`); }
+    if (upperBairro) { sql += " AND bairro LIKE ?"; params.push(`%${upperBairro}%`); }
+    if (cnae) { sql += " AND cnae LIKE ?"; params.push(`${cnae}%`); }
+    if (upperSegmento) { sql += " AND (nome_fantasia LIKE ? OR logradouro LIKE ?)"; params.push(`%${upperSegmento}%`, `%${upperSegmento}%`); }
+    const row = db.prepare(sql).get(...params);
+    res.json({ total: row?.total || 0 });
+  } catch (e) { res.json({ total: 0 }); }
+});
+
+app.post('/api/receita/scan', async (req, res) => {
+  const { uf, cidade, bairro, cnae, segmento, limit: reqLimit, offset: reqOffset } = req.body;
+  const scanLimit = Math.min(parseInt(reqLimit) || 100, 500); // máx 500
+  const scanOffset = parseInt(reqOffset) || 0;
+  try {
+    const upperCidade = normalizeString(cidade);
+    const upperBairro = normalizeString(bairro);
+    const upperSegmento = normalizeString(segmento);
+    const cityCode = SIAFI_CITIES[upperCidade] || null;
+
     let leads = [];
 
     // --- MOTOR 100% LOCAL (ARQUIVO DE 11M LEADS) ---
     if (fs.existsSync(DB_FILE)) {
       try {
-        console.log(`[🗄️] Buscando na base local: ${upperCidade || 'Geral'}...`);
-        
+        console.log(`[🗄️] Buscando na base local: ${upperCidade || 'Geral'} (limit=${scanLimit}, offset=${scanOffset})...`);
+
         let localSql = "SELECT * FROM estabelecimentos WHERE 1=1";
         const localParams = [];
-        
+
         if (uf) { localSql += " AND uf = ?"; localParams.push(uf.toUpperCase()); }
-        
+
         if (cityCode) {
             localSql += " AND municipio = ?";
             localParams.push(cityCode);
@@ -567,13 +590,13 @@ app.post('/api/receita/scan', async (req, res) => {
 
         if (upperBairro) { localSql += " AND bairro LIKE ?"; localParams.push(`%${upperBairro}%`); }
         if (cnae) { localSql += " AND cnae LIKE ?"; localParams.push(`${cnae}%`); }
-        
-        if (upperSegmento) { 
-            localSql += " AND (nome_fantasia LIKE ? OR logradouro LIKE ?)"; 
-            localParams.push(`%${upperSegmento}%`, `%${upperSegmento}%`); 
+
+        if (upperSegmento) {
+            localSql += " AND (nome_fantasia LIKE ? OR logradouro LIKE ?)";
+            localParams.push(`%${upperSegmento}%`, `%${upperSegmento}%`);
         }
-        
-        localSql += " LIMIT 100";
+
+        localSql += ` LIMIT ${scanLimit} OFFSET ${scanOffset}`;
         
         const localResult = db.prepare(localSql).all(...localParams);
         
@@ -702,7 +725,7 @@ app.post('/api/hunter/gmn_api', async (req, res) => {
             origin: 'Maps'
           };
 
-          const enriched = await qualifyLead(leadBase, job);
+          const enriched = sanitizeLeadLinks(await qualifyLead(leadBase, job));
           job.results.push(enriched);
           GMN_LEADS_STORE.leads.push(enriched);
           saveGmnLeads();
@@ -838,7 +861,7 @@ app.post('/api/hunter/gmn', async (req, res) => {
           "Nota": raw.rating,
           origin: 'Maps (Robot)'
         };
-        const enriched = await qualifyLead(lead, job);
+        const enriched = sanitizeLeadLinks(await qualifyLead(lead, job));
         job.results.push(enriched);
         GMN_LEADS_STORE.leads.push(enriched);
         saveGmnLeads();
@@ -859,6 +882,31 @@ app.get('/api/hunter/status/:jobId', (req, res) => {
   if (!job) return res.status(404).send("Not found");
   res.json(job);
 });
+
+// ── Sanitização de links GMN (aditivo, não toca qualifyLead) ──────────────
+function sanitizeLeadLinks(lead) {
+  const site = (lead["Site"] || lead.site || "").trim();
+
+  // Se o campo "Site" é na verdade um Instagram
+  if (site && site.includes('instagram.com')) {
+    lead["Instagram"] = lead["Instagram"] || site;
+    lead["Site"] = "";
+    lead.site = "";
+  }
+  // Se o campo "Site" é na verdade um LinkedIn
+  if (site && site.includes('linkedin.com')) {
+    lead["LinkedIn"] = lead["LinkedIn"] || site;
+    lead["Site"] = "";
+    lead.site = "";
+  }
+
+  // Normalizar campos para formato Capta
+  lead.site = lead["Site"] || lead.site || "";
+  lead.instagram = lead["Instagram"] || lead.instagram || "";
+  lead.linkedin = lead["LinkedIn"] || lead.linkedin || "";
+  return lead;
+}
+// ── FIM sanitização ────────────────────────────────────────────────────────
 
 app.get('/api/hunter/gmn_leads', (req, res) => {
   res.json(GMN_LEADS_STORE);
