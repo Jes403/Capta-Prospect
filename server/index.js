@@ -19,6 +19,7 @@ import https from 'https';
 
 import { createClient } from '@libsql/client';
 import { processLeadBatch } from '../scripts/ldr_validator.js';
+import { conectarWhatsApp, getStatus, dispararCampanha } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -925,101 +926,38 @@ app.delete('/api/hunter/gmn_leads', (req, res) => {
   res.json({ success: true });
 });
 
-// --- MOTOR DE DISPAROS WHATSAPP (PUPPETEER) ---
+// --- MOTOR DE DISPAROS WHATSAPP (BAILEYS — SEM BROWSER, 100% LOCAL) ---
+
+// Retorna o status da conexão e o QR Code se necessário
+app.get('/api/whatsapp/qr', (req, res) => {
+  res.json(getStatus());
+});
+
+// Inicia os disparos em segundo plano
 app.post('/api/whatsapp/send', async (req, res) => {
   const { leads, messageTemplate } = req.body;
-  if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: "Leads obrigatórios" });
+  if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: 'Leads obrigatórios' });
+
+  const { connected } = getStatus();
+  if (!connected) {
+    return res.status(400).json({
+      error: 'WhatsApp não conectado. Escaneie o QR Code na aba WhatsApp antes de disparar.'
+    });
+  }
 
   const jobId = `wa_${Date.now()}`;
-  JOBS[jobId] = { type: 'whatsapp', status: 'processing', total: leads.length, processed: 0, results: [], logs: [] };
+  JOBS[jobId] = { type: 'whatsapp', status: 'processing', total: leads.length, processed: 0, logs: [] };
   res.json({ job_id: jobId, message: 'Sequência de disparos iniciada!' });
 
-  (async () => {
-    const job = JOBS[jobId];
-    let browser;
-    try {
-      job.logs.push({ type: 'info', text: '[🚀] Iniciando robô de WhatsApp...' });
-      
-      browser = await puppeteer.launch({
-        headless: false, // Abrimos o navegador para você ver o processo
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        userDataDir: './wa_session' // Salva sua sessão do WhatsApp Web
-      });
+  // Roda em segundo plano sem travar o servidor
+  dispararCampanha(leads, messageTemplate || 'Olá [NOME]!', jobId, JOBS);
+});
 
-      const page = await browser.newPage();
-      await page.goto('https://web.whatsapp.com', { waitUntil: 'networkidle2', timeout: 60000 });
-      
-      job.logs.push({ type: 'info', text: '[⏳] Aguardando conexão do WhatsApp Web... (Leia o QR Code se necessário)' });
-      
-      // Aguarda o seletor da lista de conversas para confirmar que logou
-      try {
-        await page.waitForSelector('div[contenteditable="true"]', { timeout: 120000 });
-      } catch (e) {
-        job.logs.push({ type: 'error', text: '[❌] Tempo esgotado para login no WhatsApp.' });
-        await browser.close();
-        job.status = 'error';
-        return;
-      }
-
-      for (const lead of leads) {
-        try {
-          const rawNumber = String(lead.contact || "").replace(/[^\d]/g, '');
-          if (rawNumber.length < 10) {
-            job.logs.push({ type: 'error', text: `[⚠️] Número inválido para ${lead.name}` });
-            job.processed++;
-            continue;
-          }
-
-          // Formata o número (DDI 55 + DDD + Número)
-          const phone = rawNumber.startsWith('55') ? rawNumber : `55${rawNumber}`;
-          const personalizedMsg = messageTemplate.replace(/\[NOME\]/gi, lead.name || 'Parceiro');
-
-          job.logs.push({ type: 'info', text: `[💬] Abrindo conversa com: ${lead.name}...` });
-          
-          // Abre o link direto do WA
-          await page.goto(`https://web.whatsapp.com/send?phone=${phone}`, { waitUntil: 'networkidle2' });
-          
-          // Aguarda o campo de texto aparecer
-          const inputSelector = 'div[contenteditable="true"][data-tab="10"]';
-          await page.waitForSelector(inputSelector, { timeout: 30000 });
-          
-          job.logs.push({ type: 'info', text: `[⌨️] Simulando digitação para ${lead.name}...` });
-          
-          // Foca no campo e digita pausadamente
-          await page.focus(inputSelector);
-          for (const char of personalizedMsg) {
-            await page.keyboard.sendCharacter(char);
-            if (Math.random() > 0.8) await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
-          }
-
-          // Pequena pausa antes de enviar
-          await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-          
-          await page.keyboard.press('Enter');
-
-          job.logs.push({ type: 'success', text: `[✅] Mensagem enviada para ${lead.name}!` });
-          job.results.push({ name: lead.name, status: 'sent' });
-          
-          // Delay humano para evitar bloqueio (8-15 segundos entre leads)
-          const waitTime = 8000 + Math.random() * 7000;
-          job.logs.push({ type: 'info', text: `[⏳] Pausa de segurança: ${Math.round(waitTime/1000)}s...` });
-          await new Promise(r => setTimeout(r, waitTime));
-          
-        } catch (err) {
-          job.logs.push({ type: 'error', text: `[❌] Falha no envio para ${lead.name}: ${err.message}` });
-        }
-        job.processed++;
-      }
-
-      job.status = 'idle';
-      job.logs.push({ type: 'success', text: '[🏆] Sequência de disparos finalizada com sucesso!' });
-      // Mantemos o navegador aberto para você ver a última mensagem enviada se quiser
-    } catch (e) {
-      job.status = 'error';
-      job.logs.push({ type: 'error', text: `[💥] Erro crítico: ${e.message}` });
-      if (browser) await browser.close();
-    }
-  })();
+// Cancela uma campanha em andamento
+app.post('/api/whatsapp/cancel/:jobId', (req, res) => {
+  const job = JOBS[req.params.jobId];
+  if (job) job.status = 'cancelled';
+  res.json({ success: true });
 });
 
 const PORT = process.env.PORT || 3007;
@@ -1168,6 +1106,12 @@ app.post('/api/whatsapp/send-single', async (req, res) => {
 try {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[CAPTA-NC] Backend Master rodando na porta ${PORT}`);
+
+    // Inicia conexão com o WhatsApp automaticamente
+    console.log('[📱 WA] Iniciando conexão com o WhatsApp (Baileys)...');
+    conectarWhatsApp().catch(err => {
+      console.error('[📱 WA] Erro ao iniciar WhatsApp:', err.message);
+    });
   });
   
   server.on('error', (err) => {
@@ -1176,3 +1120,4 @@ try {
 } catch (e) {
   console.error('[💥] FALHA CRÍTICA AO INICIAR SERVIDOR:', e);
 }
+

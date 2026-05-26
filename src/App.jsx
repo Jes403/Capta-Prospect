@@ -158,10 +158,31 @@ function AuthenticatedApp({ user, onLogout }) {
 
   const displayLeads = leads;
 
-  // States para WhatsApp
+  // States para WhatsApp (Baileys)
   const [waMessage, setWaMessage] = useState("Olá [NOME], vi que sua empresa está crescendo e gostaria de apresentar nossas soluções de TI e Segurança Eletrônica da NSTI. Podemos conversar?");
   const [waLogs, setWaLogs] = useState([]);
   const [isSendingWA, setIsSendingWA] = useState(false);
+  const [waConnected, setWaConnected] = useState(false);
+  const [waQR, setWaQR] = useState(null);
+  const [waProgress, setWaProgress] = useState({ processed: 0, total: 0 });
+  const [waJobId, setWaJobId] = useState(null);
+
+  // Polling do status da conexão WhatsApp
+  useEffect(() => {
+    const checkWA = async () => {
+      try {
+        const res = await fetch(`${apiKeys.backend}/api/whatsapp/qr`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setWaConnected(data.connected);
+        setWaQR(data.hasQR ? data.qr : null);
+      } catch {}
+    };
+    checkWA();
+    const interval = setInterval(checkWA, 5000);
+    return () => clearInterval(interval);
+  }, [apiKeys.backend]);
+
   // States Evolution API (aditivo)
   const [waStatus, setWaStatus] = useState({ state: 'close', connected: false, label: 'Desconectado' });
   const [waQrCode, setWaQrCode] = useState(null);
