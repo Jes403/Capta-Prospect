@@ -1019,6 +1019,15 @@ app.get('/api/whatsapp/messages/:jid', (req, res) => {
 
 // --- FIM — MOTOR DE DISPAROS WHATSAPP (BAILEYS) ---
 
+// Serve o frontend compilado (pasta dist/) — usado na distribuição para clientes
+const distPath = path.join(__dirname, '../dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
 try {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[CAPTA-NC] Backend Master rodando na porta ${PORT}`);
