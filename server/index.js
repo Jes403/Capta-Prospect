@@ -19,7 +19,7 @@ import https from 'https';
 
 import { createClient } from '@libsql/client';
 import { processLeadBatch } from '../scripts/ldr_validator.js';
-import { conectarWhatsApp, getStatus, dispararCampanha } from './whatsapp.js';
+import { conectarWhatsApp, getStatus, dispararCampanha, verificarNumero, enviarMensagem } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -928,9 +928,25 @@ app.delete('/api/hunter/gmn_leads', (req, res) => {
 
 // --- MOTOR DE DISPAROS WHATSAPP (BAILEYS — SEM BROWSER, 100% LOCAL) ---
 
-// Retorna o status da conexão e o QR Code se necessário
+// Retorna o status da conexão no padrão unificado compatível com o frontend
+app.get('/api/whatsapp/status', (req, res) => {
+  const status = getStatus();
+  res.json({
+    state: status.connected ? 'open' : status.hasQR ? 'connecting' : 'close',
+    connected: status.connected,
+    label: status.connected ? 'Conectado e Ativo' : status.hasQR ? 'Aguardando Leitura de QR no Terminal...' : 'Desconectado',
+    qr: status.qr
+  });
+});
+
+// Retorna o QR Code ativo se houver (para fins de compatibilidade)
 app.get('/api/whatsapp/qr', (req, res) => {
-  res.json(getStatus());
+  const status = getStatus();
+  res.json({
+    qrCode: status.qr,
+    connected: status.connected,
+    hasQR: status.hasQR
+  });
 });
 
 // Inicia os disparos em segundo plano
@@ -941,12 +957,12 @@ app.post('/api/whatsapp/send', async (req, res) => {
   const { connected } = getStatus();
   if (!connected) {
     return res.status(400).json({
-      error: 'WhatsApp não conectado. Escaneie o QR Code na aba WhatsApp antes de disparar.'
+      error: 'WhatsApp não está conectado. Conecte no terminal do backend antes de disparar.'
     });
   }
 
   const jobId = `wa_${Date.now()}`;
-  JOBS[jobId] = { type: 'whatsapp', status: 'processing', total: leads.length, processed: 0, logs: [] };
+  JOBS[jobId] = { type: 'whatsapp', status: 'running', total: leads.length, processed: 0, logs: [] };
   res.json({ job_id: jobId, message: 'Sequência de disparos iniciada!' });
 
   // Roda em segundo plano sem travar o servidor
@@ -956,152 +972,40 @@ app.post('/api/whatsapp/send', async (req, res) => {
 // Cancela uma campanha em andamento
 app.post('/api/whatsapp/cancel/:jobId', (req, res) => {
   const job = JOBS[req.params.jobId];
-  if (job) job.status = 'cancelled';
+  if (job) {
+    job.status = 'cancelled';
+    job.logs.push({ type: 'info', text: '[⛔] Campanha cancelada pelo usuário.' });
+  }
   res.json({ success: true });
 });
 
-const PORT = process.env.PORT || 3007;
-app.post('/api/mine/casadosdados', async (req, res) => {
-  const { cnae, uf, municipio } = req.body;
-  try {
-    const leads = await mineCasaDosDados({ cnae, uf, municipio });
-    res.json({ success: true, leads });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ============================================================
-// EVOLUTION API — WHATSAPP (VPS-READY, ADITIVO, NÃO INTERFERE)
-// ============================================================
-const EVO_URL  = (process.env.EVOLUTION_API_URL  || 'http://localhost:8080').replace(/\/$/, '');
-const EVO_KEY  = process.env.EVOLUTION_API_KEY   || 'nsti_master_key_free_99';
-const EVO_INST = process.env.EVOLUTION_INSTANCE_NAME || 'capta_instance';
-const evoHeaders = () => ({ 'Content-Type': 'application/json', 'apikey': EVO_KEY });
-
-// GET /api/whatsapp/status
-app.get('/api/whatsapp/status', async (req, res) => {
-  try {
-    const r = await axios.get(`${EVO_URL}/instance/connectionState/${EVO_INST}`, { headers: evoHeaders(), timeout: 8000 });
-    const state = r.data?.instance?.state || r.data?.state || 'close';
-    res.json({ state, connected: state === 'open', label: state === 'open' ? 'Conectado e Ativo' : state === 'connecting' ? 'Conectando...' : 'Desconectado' });
-  } catch (e) {
-    res.json({ state: 'close', connected: false, label: 'Desconectado', error: e.message });
-  }
-});
-
-// GET /api/whatsapp/qr
-app.get('/api/whatsapp/qr', async (req, res) => {
-  try {
-    // Tenta conectar/criar instância para gerar QR
-    let connectRes;
-    try {
-      connectRes = await axios.get(`${EVO_URL}/instance/connect/${EVO_INST}`, { headers: evoHeaders(), timeout: 10000 });
-    } catch (e) {
-      // Se instância não existe, cria ela primeiro
-      await axios.post(`${EVO_URL}/instance/create`, { instanceName: EVO_INST, qrcode: true, integration: 'WHATSAPP-BAILEYS' }, { headers: evoHeaders(), timeout: 10000 }).catch(() => {});
-      await new Promise(r => setTimeout(r, 2000));
-      connectRes = await axios.get(`${EVO_URL}/instance/connect/${EVO_INST}`, { headers: evoHeaders(), timeout: 10000 });
-    }
-    const qrCode = connectRes.data?.base64 || connectRes.data?.qrcode?.base64 || connectRes.data?.code || null;
-    if (!qrCode) return res.status(503).json({ error: 'QR Code não disponível. Verifique se a Evolution API está rodando.' });
-    res.json({ qrCode });
-  } catch (e) {
-    res.status(503).json({ error: 'Evolution API offline. Configure EVOLUTION_API_URL no .env.' });
-  }
-});
-
-// POST /api/whatsapp/send
-app.post('/api/whatsapp/send', async (req, res) => {
-  const { leads, messageTemplate } = req.body;
-  if (!leads || leads.length === 0) return res.status(400).json({ error: 'Nenhum lead informado.' });
-
-  const jobId = `wa_${Date.now()}`;
-  JOBS[jobId] = { status: 'running', processed: 0, total: leads.length, results: [], logs: [] };
-  res.json({ job_id: jobId });
-
-  (async () => {
-    const job = JOBS[jobId];
-    job.logs.push({ type: 'info', text: `[📡] Evolution API: iniciando ${leads.length} disparos...` });
-
-    for (const lead of leads) {
-      // Formatar telefone: remover tudo que não é dígito, garantir DDI 55
-      let rawPhone = String(lead.contact || lead.phone || '').replace(/\D/g, '');
-      if (!rawPhone) {
-        job.processed++;
-        job.logs.push({ type: 'error', text: `[⚠️] ${lead.name}: sem telefone, pulado.` });
-        continue;
-      }
-      if (!rawPhone.startsWith('55')) rawPhone = '55' + rawPhone;
-
-      const msg = (messageTemplate || '').replace(/\[NOME\]/gi, (lead.name || '').split(' ')[0]);
-      try {
-        await axios.post(
-          `${EVO_URL}/message/sendText/${EVO_INST}`,
-          { number: rawPhone, text: msg },
-          { headers: evoHeaders(), timeout: 15000 }
-        );
-        job.logs.push({ type: 'success', text: `[✅] Enviado: ${lead.name} (${rawPhone})` });
-      } catch (e) {
-        const detail = e.response?.data?.message || e.message;
-        job.logs.push({ type: 'error', text: `[❌] Falha ${lead.name}: ${detail}` });
-      }
-      job.processed++;
-      // Delay anti-bloqueio: 10s entre mensagens
-      if (job.processed < leads.length) await new Promise(r => setTimeout(r, 10000));
-    }
-
-    job.status = 'idle';
-    job.logs.push({ type: 'info', text: `[🏁] Campanha finalizada. ${job.processed}/${job.total} processados.` });
-  })();
-});
-// POST /api/whatsapp/check-number — Validação individual anti-spam
+// Validação individual anti-spam local usando o método onWhatsApp do Baileys
 app.post('/api/whatsapp/check-number', async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Telefone não informado.' });
 
-  let clean = String(phone).replace(/\D/g, '');
-  if (!clean.startsWith('55')) clean = '55' + clean;
-
   try {
-    const r = await axios.post(
-      `${EVO_URL}/chat/whatsappNumbers/${EVO_INST}`,
-      { numbers: [clean] },
-      { headers: evoHeaders(), timeout: 10000 }
-    );
-    const result = r.data?.[0] || r.data?.find?.(n => n);
-    const exists = result?.exists ?? result?.numberExists ?? false;
-    const jid = result?.jid || result?.remoteJid || clean + '@s.whatsapp.net';
-    const formattedPhone = result?.number || clean;
-    res.json({ exists, jid, formattedPhone });
+    const result = await verificarNumero(phone);
+    res.json(result);
   } catch (e) {
-    res.status(503).json({ error: 'Evolution API offline ou número inválido.', exists: false });
+    res.status(503).json({ error: 'WhatsApp não está conectado ou falha local.', exists: false });
   }
 });
 
-// POST /api/whatsapp/send-single — Disparo individual (Abordagem Rápida)
+// Envio de mensagem individual para Abordagem Rápida na ficha do lead
 app.post('/api/whatsapp/send-single', async (req, res) => {
   const { phone, message } = req.body;
   if (!phone || !message) return res.status(400).json({ error: 'Telefone e mensagem são obrigatórios.' });
 
-  let clean = String(phone).replace(/\D/g, '');
-  if (!clean.startsWith('55')) clean = '55' + clean;
-
   try {
-    await axios.post(
-      `${EVO_URL}/message/sendText/${EVO_INST}`,
-      { number: clean, text: message },
-      { headers: evoHeaders(), timeout: 15000 }
-    );
-    res.json({ success: true, phone: clean });
+    await enviarMensagem(phone, message);
+    res.json({ success: true, phone });
   } catch (e) {
-    const detail = e.response?.data?.message || e.message;
-    res.status(500).json({ success: false, error: detail });
+    res.status(500).json({ success: false, error: e.message });
   }
 });
-// ============================================================
-// FIM — EVOLUTION API WHATSAPP
-// ============================================================
+
+// --- FIM — MOTOR DE DISPAROS WHATSAPP (BAILEYS) ---
 
 try {
   const server = app.listen(PORT, '0.0.0.0', () => {

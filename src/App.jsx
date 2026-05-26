@@ -592,7 +592,7 @@ function AuthenticatedApp({ user, onLogout }) {
         alert(data.error || 'Não foi possível gerar QR Code.');
       }
     } catch (e) {
-      alert('Evolution API offline. Verifique se está rodando na VPS ou localmente.');
+      alert('WhatsApp local offline. Verifique se o backend está rodando localmente.');
     } finally {
       setIsLoadingQr(false);
     }
@@ -610,7 +610,14 @@ function AuthenticatedApp({ user, onLogout }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leads: targetLeads, messageTemplate: waMessage })
       });
-      const { job_id } = await res.json();
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+        setIsSendingWA(false);
+        return;
+      }
+      const { job_id } = data;
+      setWaJobId(job_id); // Salvando ID do Job para cancelamento
       const poll = setInterval(async () => {
         try {
           const s = await fetch(`${apiKeys.backend}/api/hunter/status/${job_id}`);
@@ -618,10 +625,23 @@ function AuthenticatedApp({ user, onLogout }) {
           const job = await s.json();
           setWaLogs(job.logs || []);
           setWaProgress({ processed: job.processed, total: job.total });
-          if (job.status === 'idle' || job.status === 'error') { clearInterval(poll); setIsSendingWA(false); }
+          if (job.status === 'idle' || job.status === 'error' || job.status === 'cancelled') { 
+            clearInterval(poll); 
+            setIsSendingWA(false); 
+          }
         } catch { clearInterval(poll); setIsSendingWA(false); }
       }, 2000);
     } catch (err) { setIsSendingWA(false); setWaLogs([{ type: 'error', text: `[💥] ${err.message}` }]); }
+  };
+
+  const handleCancelWaCampaign = async () => {
+    if (!waJobId) return;
+    try {
+      await fetch(`${apiKeys.backend}/api/whatsapp/cancel/${waJobId}`, { method: 'POST' });
+      setWaLogs(prev => [...prev, { type: 'info', text: '[⛔] Comando de cancelamento enviado pelo painel...' }]);
+    } catch (e) {
+      alert(`Erro ao cancelar: ${e.message}`);
+    }
   };
   const handleCheckWaNumber = async (phone) => {
     setWaCardCheck('checking');
@@ -1393,124 +1413,141 @@ function AuthenticatedApp({ user, onLogout }) {
             </div>
           )}
 
-          {/* WHATSAPP — Evolution API Premium Panel */}
+          {/* WHATSAPP — Baileys Local Premium Panel */}
           {activeTab === 'whatsapp' && (
             <div className="space-y-6 animate-in fade-in duration-500">
 
               {/* Status Card */}
               <div className={`flex items-center justify-between px-6 py-4 rounded-xl border ${waStatus.connected ? 'bg-emerald-950/40 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'bg-slate-900/60 border-white/5'}`}>
                 <div className="flex items-center gap-3">
-                  <span className={`w-3 h-3 rounded-full ${waStatus.connected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse' : 'bg-red-500'}`}></span>
-                  <span className="font-space text-sm font-bold uppercase tracking-widest text-white">{waStatus.label}</span>
-                  {waStatus.connected && <span className="text-[10px] font-mono text-emerald-400/70 border border-emerald-500/20 px-2 py-0.5 rounded">Evolution API • Ativo</span>}
+                  <span className={`w-3 h-3 rounded-full ${waStatus.connected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse' : waStatus.state === 'connecting' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)] animate-pulse' : 'bg-red-500'}`}></span>
+                  <span className="font-space text-sm font-bold uppercase tracking-widest text-white">
+                    {waStatus.connected ? 'WhatsApp Conectado' : waStatus.state === 'connecting' ? 'Aguardando Leitura de QR no Terminal' : 'WhatsApp Desconectado'}
+                  </span>
+                  <span className="text-[10px] font-mono text-cyan-400/70 border border-cyan-500/20 px-2 py-0.5 rounded">Motor Baileys Local</span>
                 </div>
                 <button onClick={fetchWaStatus} className="text-[10px] font-space uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors px-3 py-1 border border-white/5 rounded hover:border-white/10">
-                  Verificar
+                  Verificar Status
                 </button>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-                {/* Coluna Esquerda — QR Code ou Painel de Campanha */}
+                {/* Coluna Esquerda — Configuração de Campanha */}
                 <Card className="bg-capta-surface-low/50 border-white/5 backdrop-blur-md p-6 space-y-5">
-
-                  {!waStatus.connected ? (
-                    /* QR Code Section */
-                    <div className="space-y-5">
-                      <div>
-                        <h2 className="text-lg font-space font-bold uppercase text-white tracking-widest">Conectar WhatsApp</h2>
-                        <p className="text-[11px] text-slate-500 font-mono mt-1">Gere o QR Code e escaneie com seu celular para vincular a instância.</p>
-                      </div>
-                      {waQrCode ? (
-                        <div className="flex flex-col items-center gap-4">
-                          <div className="p-3 bg-white rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.2)]">
-                            <img src={waQrCode.startsWith('data:') ? waQrCode : `data:image/png;base64,${waQrCode}`} alt="QR Code WhatsApp" className="w-52 h-52" />
-                          </div>
-                          <p className="text-[11px] text-cyan-400/80 font-mono animate-pulse text-center">Aguardando leitura... verificando a cada 4s</p>
-                          <button onClick={() => { if (waQrPollRef.current) clearInterval(waQrPollRef.current); setWaQrCode(null); }} className="text-[10px] font-space uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors">
-                            Cancelar
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={fetchWaQr}
-                          disabled={isLoadingQr}
-                          className="w-full h-14 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/30 hover:border-cyan-400/50 text-cyan-300 font-space font-bold uppercase tracking-[0.15em] text-sm rounded-lg transition-all shadow-[0_0_20px_rgba(6,182,212,0.1)] hover:shadow-[0_0_25px_rgba(6,182,212,0.2)] flex items-center justify-center gap-2"
-                        >
-                          {isLoadingQr ? <><Activity className="animate-spin" size={16} /> Gerando QR...</> : <><Send size={16} /> Gerar QR Code de Conexão</>}
-                        </button>
-                      )}
+                  <div className="space-y-5">
+                    <div>
+                      <h2 className="text-lg font-space font-bold uppercase text-white tracking-widest">Disparos de Prospecção</h2>
+                      <p className="text-[11px] text-slate-500 font-mono mt-1">Disparos locais humanizados com proteção anti-bloqueio avançada.</p>
                     </div>
-                  ) : (
-                    /* Campanha Section — só aparece quando conectado */
-                    <div className="space-y-5">
-                      <div>
-                        <h2 className="text-lg font-space font-bold uppercase text-white tracking-widest">Disparos Estratégicos</h2>
-                        <p className="text-[11px] text-emerald-400/70 font-mono mt-1">WhatsApp conectado via Evolution API.</p>
-                      </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Lista de Destino</label>
-                        <select
-                          value={waSelectedList}
-                          onChange={e => setWaSelectedList(e.target.value)}
-                          className="w-full h-10 bg-black/30 border border-white/10 px-3 text-white font-space text-sm outline-none focus:border-cyan-500/50 transition-colors rounded"
-                        >
-                          <option value="qualificado">Leads Qualificados ({leads.filter(l => l.status === 'qualificado').length})</option>
-                          <option value="contato">Em Contato ({leads.filter(l => l.status === 'contato').length})</option>
-                          <option value="all">Toda a Base ({leads.length})</option>
-                        </select>
+                    {!waStatus.connected && (
+                      <div className="p-4 bg-amber-950/20 border border-amber-500/20 rounded-lg text-amber-300 font-mono text-[11px] leading-relaxed">
+                        ⚠️ <strong>Status: Desconectado.</strong><br />
+                        O QR Code de conexão é gerado diretamente no terminal do backend (Terminal 2). Abra o console, escaneie com a câmera do seu WhatsApp no celular e verifique novamente o status.
                       </div>
+                    )}
 
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Mensagem (use [NOME])</label>
-                        <textarea
-                          value={waMessage}
-                          onChange={e => setWaMessage(e.target.value)}
-                          className="w-full h-40 bg-black/30 border border-white/10 p-3 text-white font-space text-sm outline-none focus:border-cyan-500/50 transition-all resize-none rounded"
-                          placeholder="Olá [NOME], ..."
-                        />
-                      </div>
-
-                      <button
-                        onClick={handleStartWaCampaign}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Lista de Destino</label>
+                      <select
+                        value={waSelectedList}
+                        onChange={e => setWaSelectedList(e.target.value)}
+                        className="w-full h-10 bg-black/30 border border-white/10 px-3 text-white font-space text-sm outline-none focus:border-cyan-500/50 transition-colors rounded"
                         disabled={isSendingWA}
-                        className={`w-full h-14 font-space font-bold uppercase tracking-[0.15em] text-sm rounded-lg transition-all flex items-center justify-center gap-2 ${isSendingWA ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 hover:border-emerald-400/50 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.1)] hover:shadow-[0_0_25px_rgba(16,185,129,0.2)]'}`}
                       >
-                        {isSendingWA ? <><Activity className="animate-spin" size={16} /> Enviando...</> : <><Send size={16} /> Iniciar Campanha</>}
-                      </button>
+                        <option value="qualificado">Leads Qualificados ({leads.filter(l => l.status === 'qualificado').length})</option>
+                        <option value="contato">Em Contato ({leads.filter(l => l.status === 'contato').length})</option>
+                        <option value="all">Toda a Base ({leads.length})</option>
+                      </select>
                     </div>
-                  )}
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Mensagem (use [NOME])</label>
+                        <span className="text-[9px] text-cyan-400/60 font-mono">Anti-Spam Dinâmico Ativo</span>
+                      </div>
+                      <textarea
+                        value={waMessage}
+                        onChange={e => setWaMessage(e.target.value)}
+                        className="w-full h-40 bg-black/30 border border-white/10 p-3 text-white font-space text-sm outline-none focus:border-cyan-500/50 transition-all resize-none rounded"
+                        placeholder="Olá [NOME]! Vi o site de vocês..."
+                        disabled={isSendingWA}
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleStartWaCampaign}
+                      disabled={isSendingWA || !waStatus.connected}
+                      className={`w-full h-14 font-space font-bold uppercase tracking-[0.15em] text-sm rounded-lg transition-all flex items-center justify-center gap-2 ${
+                        !waStatus.connected
+                          ? 'bg-slate-800 text-slate-500 border border-white/5 cursor-not-allowed'
+                          : isSendingWA
+                          ? 'bg-cyan-950/20 text-cyan-400 border border-cyan-500/20 cursor-not-allowed animate-pulse'
+                          : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 hover:border-emerald-400/50 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.1)] hover:shadow-[0_0_25px_rgba(16,185,129,0.2)]'
+                      }`}
+                    >
+                      {isSendingWA ? (
+                        <><Activity className="animate-spin" size={16} /> Campanha em Andamento...</>
+                      ) : !waStatus.connected ? (
+                        'Conecte o WhatsApp no Terminal para Disparar'
+                      ) : (
+                        <><Send size={16} /> Iniciar Disparos Locais</>
+                      )}
+                    </button>
+                  </div>
                 </Card>
 
-                {/* Coluna Direita — Console */}
+                {/* Coluna Direita — Monitor de Disparos Ativo */}
                 <div className="bg-capta-surface-low/30 border border-white/5 flex flex-col font-mono text-[11px] h-[calc(100vh-320px)] min-h-[400px] overflow-hidden rounded-xl">
                   <div className="p-4 border-b border-white/5 bg-white/5 font-space uppercase tracking-[0.2em] text-slate-400 flex justify-between items-center">
-                    <span>Console de Operações WA</span>
-                    {isSendingWA && <span className="text-[10px] text-emerald-400 animate-pulse">● Campanha Ativa</span>}
+                    <span>Monitor de Disparos Ativo</span>
+                    {isSendingWA ? (
+                      <span className="text-[10px] text-emerald-400 animate-pulse flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                        Disparando... (15-30s delay)
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-slate-600">Fila Ociosa</span>
+                    )}
                   </div>
                   <div className="flex-1 p-5 space-y-1.5 overflow-y-auto custom-scrollbar bg-black/20">
                     {waLogs.length === 0 ? (
-                      <div className="text-slate-700 italic">Aguardando comando...</div>
+                      <div className="text-slate-700 italic">Nenhuma campanha de disparos ativa no momento.</div>
                     ) : (
                       waLogs.map((log, i) => (
-                        <div key={i} className={`flex gap-3 leading-relaxed ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                        <div key={i} className={`flex gap-3 leading-relaxed ${
+                          log.type === 'error' ? 'text-red-400' : 
+                          log.type === 'success' ? 'text-emerald-400' : 
+                          log.type === 'warning' ? 'text-amber-400' : 'text-slate-400'
+                        }`}>
                           <span className="opacity-30 shrink-0">[{new Date().toLocaleTimeString()}]</span>
                           <span className="break-all">{log.text}</span>
                         </div>
                       ))
                     )}
                   </div>
+                  
+                  {/* Barra de Progresso e Botão de Cancelar */}
                   {isSendingWA && (
-                    <div className="p-4 border-t border-white/5 bg-white/5">
-                      <div className="flex justify-between mb-2">
-                        <span className="text-[10px] font-space uppercase tracking-widest text-cyan-400">Progresso</span>
-                        <span className="font-mono text-white">{waProgress.processed} / {waProgress.total}</span>
+                    <div className="p-4 border-t border-white/5 bg-white/5 space-y-4">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <span className="text-[10px] font-space uppercase tracking-widest text-cyan-400 block">Progresso da Campanha</span>
+                          <span className="text-[9px] text-slate-500 font-mono">Anti-Ban ativo: descanso automático a cada 10 envios</span>
+                        </div>
+                        <span className="font-mono text-white text-xs">{waProgress.processed} / {waProgress.total}</span>
                       </div>
                       <div className="h-1.5 bg-white/5 w-full rounded-full overflow-hidden">
                         <div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]"
                           style={{ width: `${(waProgress.processed / waProgress.total) * 100 || 0}%` }} />
                       </div>
+                      <button
+                        onClick={handleCancelWaCampaign}
+                        className="w-full h-9 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 hover:border-red-500/40 text-red-400 font-space font-bold uppercase tracking-wider text-[10px] rounded transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <X size={12} /> Cancelar Disparos
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1627,7 +1664,7 @@ function AuthenticatedApp({ user, onLogout }) {
                       {/* Badge resultado */}
                       {waCardCheck && waCardCheck !== 'checking' && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded text-[11px] font-mono font-bold ${waCardCheck === 'error' ? 'bg-red-950/40 border border-red-500/20 text-red-400' : waCardCheck.exists ? 'bg-emerald-950/40 border border-emerald-500/20 text-emerald-400' : 'bg-red-950/40 border border-red-500/20 text-red-400'}`}>
-                          {waCardCheck === 'error' ? '⚠️ Evolution API offline' : waCardCheck.exists ? `✅ WhatsApp Confirmado — ${waCardCheck.formattedPhone}` : '❌ Número Sem WhatsApp Ativo'}
+                          {waCardCheck === 'error' ? '⚠️ WhatsApp Local offline' : waCardCheck.exists ? `✅ WhatsApp Confirmado — ${waCardCheck.formattedPhone}` : '❌ Número Sem WhatsApp Ativo'}
                         </div>
                       )}
 

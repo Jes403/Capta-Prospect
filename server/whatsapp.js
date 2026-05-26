@@ -114,7 +114,7 @@ function formatarNumero(numero) {
  */
 export async function enviarMensagem(numero, mensagem) {
   if (!isConnected || !sock) {
-    throw new Error('WhatsApp não está conectado. Escaneie o QR Code primeiro.');
+    throw new Error('WhatsApp não está conectado. Conecte pelo celular primeiro.');
   }
 
   const jid = formatarNumero(numero);
@@ -125,7 +125,30 @@ export async function enviarMensagem(numero, mensagem) {
 }
 
 /**
- * Processa a lista completa de leads com delay humano
+ * Verifica se um número está cadastrado no WhatsApp (Validação Local Anti-Spam)
+ */
+export async function verificarNumero(numero) {
+  if (!isConnected || !sock) {
+    throw new Error('WhatsApp não está conectado.');
+  }
+
+  const jid = formatarNumero(numero);
+  if (!jid) return { exists: false };
+
+  try {
+    const [result] = await sock.onWhatsApp(jid);
+    return {
+      exists: !!result?.exists,
+      jid: result?.jid || jid,
+      formattedPhone: result?.jid ? result.jid.split('@')[0] : numero
+    };
+  } catch (err) {
+    return { exists: false, error: err.message };
+  }
+}
+
+/**
+ * Processa a lista completa de leads com delay humano e pausas anti-bloqueio
  */
 export async function dispararCampanha(leads, template, jobId, JOBS) {
   const job = JOBS[jobId];
@@ -135,6 +158,8 @@ export async function dispararCampanha(leads, template, jobId, JOBS) {
   job.total = leads.length;
   job.processed = 0;
   job.logs = [{ type: 'info', text: `[🚀] Iniciando campanha para ${leads.length} contatos...` }];
+
+  let successCount = 0;
 
   for (const lead of leads) {
     if (job.status === 'cancelled') {
@@ -156,17 +181,26 @@ export async function dispararCampanha(leads, template, jobId, JOBS) {
       await enviarMensagem(numero, mensagem);
       job.logs.push({ type: 'success', text: `[✅] Enviado: ${nome} (${numero})` });
       job.processed++;
+      successCount++;
 
-      // Delay humanizado: entre 8 e 20 segundos entre mensagens
-      const delayMs = Math.floor(Math.random() * 12000) + 8000;
-      job.logs.push({ type: 'info', text: `[⏳] Aguardando ${(delayMs / 1000).toFixed(0)}s antes do próximo...` });
-      await delay(delayMs);
+      if (job.status === 'cancelled') break;
+
+      // Se completou múltiplo de 10 envios bem-sucedidos, faz uma pausa maior de descanso de 60 segundos
+      if (successCount > 0 && successCount % 10 === 0 && job.processed < leads.length) {
+        job.logs.push({ type: 'info', text: `[💤] Pausa de descanso anti-bloqueio por 60 segundos...` });
+        await delay(60000);
+      } else if (job.processed < leads.length) {
+        // Delay humanizado dinâmico: entre 15 e 30 segundos
+        const delayMs = Math.floor(Math.random() * 15000) + 15000;
+        job.logs.push({ type: 'info', text: `[⏳] Aguardando ${(delayMs / 1000).toFixed(0)}s antes do próximo...` });
+        await delay(delayMs);
+      }
 
     } catch (err) {
       job.logs.push({ type: 'error', text: `[❌] Falha em ${nome}: ${err.message}` });
       job.processed++;
-      // Espera um pouco mais após um erro para não forçar o sistema
-      await delay(5000);
+      // Espera um pouco mais após um erro antes de tentar o próximo
+      await delay(8000);
     }
   }
 
@@ -177,3 +211,4 @@ export async function dispararCampanha(leads, template, jobId, JOBS) {
     text: `[🏆] Campanha concluída! ${sucesso} de ${leads.length} mensagens enviadas.`
   });
 }
+
