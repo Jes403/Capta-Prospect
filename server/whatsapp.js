@@ -24,6 +24,9 @@ let sock = null;
 let isConnected = false;
 let qrCodeString = null;
 
+// Armazenamento de conversas em memória (jid -> conversa)
+const conversationsMap = new Map();
+
 /**
  * Inicia e mantém a conexão com o WhatsApp
  */
@@ -78,6 +81,43 @@ export async function conectarWhatsApp() {
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  // Captura mensagens recebidas e enviadas para a Caixa de Entrada
+  sock.ev.on('messages.upsert', ({ messages, type }) => {
+    if (type !== 'notify' && type !== 'append') return;
+    for (const msg of messages) {
+      if (!msg.message) continue;
+      const jid = msg.key.remoteJid;
+      if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
+
+      const isFromMe = !!msg.key.fromMe;
+      const text =
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        msg.message?.videoMessage?.caption ||
+        (msg.message?.imageMessage ? '[Imagem]' : null) ||
+        (msg.message?.videoMessage ? '[Vídeo]' : null) ||
+        (msg.message?.audioMessage ? '[Áudio]' : null) ||
+        (msg.message?.documentMessage ? '[Arquivo]' : null) ||
+        '[Mensagem]';
+
+      const timestamp = Number(msg.messageTimestamp) * 1000;
+      const pushName = msg.pushName || null;
+
+      if (!conversationsMap.has(jid)) {
+        conversationsMap.set(jid, { jid, name: pushName || jid.split('@')[0], messages: [], unread: 0 });
+      }
+      const conv = conversationsMap.get(jid);
+      if (pushName && !isFromMe) conv.name = pushName;
+      conv.messages.push({ text, fromMe: isFromMe, timestamp });
+      if (conv.messages.length > 100) conv.messages.shift();
+      conv.lastMessage = text;
+      conv.lastTimestamp = timestamp;
+      if (!isFromMe) conv.unread = (conv.unread || 0) + 1;
+    }
+  });
+
   return sock;
 }
 
@@ -122,6 +162,26 @@ export async function enviarMensagem(numero, mensagem) {
 
   await sock.sendMessage(jid, { text: mensagem });
   return true;
+}
+
+/**
+ * Retorna lista de conversas ordenadas pela mais recente
+ */
+export function getConversations() {
+  return Array.from(conversationsMap.values())
+    .sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0))
+    .slice(0, 50)
+    .map(({ jid, name, lastMessage, lastTimestamp, unread }) => ({ jid, name, lastMessage, lastTimestamp, unread }));
+}
+
+/**
+ * Retorna mensagens de uma conversa específica e marca como lida
+ */
+export function getMessages(jid) {
+  const conv = conversationsMap.get(jid);
+  if (!conv) return [];
+  conv.unread = 0;
+  return conv.messages;
 }
 
 /**

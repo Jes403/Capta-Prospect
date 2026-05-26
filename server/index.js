@@ -19,10 +19,12 @@ import https from 'https';
 
 import { createClient } from '@libsql/client';
 import { processLeadBatch } from '../scripts/ldr_validator.js';
-import { conectarWhatsApp, getStatus, dispararCampanha, verificarNumero, enviarMensagem } from './whatsapp.js';
+import { conectarWhatsApp, getStatus, dispararCampanha, verificarNumero, enviarMensagem, getConversations, getMessages } from './whatsapp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const PORT = process.env.PORT || 3007;
 
 // --- CONFIGURAÇÃO DE CAMINHOS E BANCO ---
 const DB_FILE = path.join(__dirname, '../data/receita_federal.db');
@@ -1003,6 +1005,16 @@ app.post('/api/whatsapp/send-single', async (req, res) => {
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
+});
+
+// Caixa de Entrada — lista de conversas
+app.get('/api/whatsapp/conversations', (req, res) => {
+  res.json(getConversations());
+});
+
+// Caixa de Entrada — mensagens de uma conversa
+app.get('/api/whatsapp/messages/:jid', (req, res) => {
+  res.json(getMessages(decodeURIComponent(req.params.jid)));
 });
 
 // --- FIM — MOTOR DE DISPAROS WHATSAPP (BAILEYS) ---

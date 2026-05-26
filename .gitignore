@@ -33,6 +33,7 @@ auth-wal
 # SESSÃO DO WHATSAPP (PESADO E PESSOAL)
 # ==========================
 wa_session/
+wa_session_baileys/
 
 # ==========================
 # LOGS

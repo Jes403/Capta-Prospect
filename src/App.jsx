@@ -167,15 +167,16 @@ function AuthenticatedApp({ user, onLogout }) {
   const [waProgress, setWaProgress] = useState({ processed: 0, total: 0 });
   const [waJobId, setWaJobId] = useState(null);
 
-  // Polling do status da conexão WhatsApp
+  // Polling automático do status da conexão WhatsApp a cada 5s
   useEffect(() => {
+    if (!apiKeys.backend) return;
     const checkWA = async () => {
       try {
-        const res = await fetch(`${apiKeys.backend}/api/whatsapp/qr`);
+        const res = await fetch(`${apiKeys.backend}/api/whatsapp/status`);
         if (!res.ok) return;
         const data = await res.json();
+        setWaStatus(data);
         setWaConnected(data.connected);
-        setWaQR(data.hasQR ? data.qr : null);
       } catch {}
     };
     checkWA();
@@ -188,6 +189,12 @@ function AuthenticatedApp({ user, onLogout }) {
   const [waQrCode, setWaQrCode] = useState(null);
   const [isLoadingQr, setIsLoadingQr] = useState(false);
   const [waSelectedList, setWaSelectedList] = useState('qualificado');
+  const [waLeadLimit, setWaLeadLimit] = useState(20);
+  const [waSubTab, setWaSubTab] = useState('disparos'); // 'disparos' | 'conversas'
+  const [waConversations, setWaConversations] = useState([]);
+  const [waSelectedConv, setWaSelectedConv] = useState(null);
+  const [waConvMessages, setWaConvMessages] = useState([]);
+  const waMessagesEndRef = useRef(null);
   const waQrPollRef = useRef(null);
   // States Abordagem Rápida (modal do card)
   const [waCardCheck, setWaCardCheck] = useState(null); // null | 'checking' | {exists, jid, formattedPhone} | 'error'
@@ -601,10 +608,11 @@ function AuthenticatedApp({ user, onLogout }) {
   const handleStartWaCampaign = async () => {
     const listMap = { qualificado: 'qualificado', contato: 'contato', all: null };
     const filter = listMap[waSelectedList];
-    const targetLeads = filter ? leads.filter(l => l.status === filter) : leads;
+    const filteredLeads = filter ? leads.filter(l => l.status === filter) : leads;
+    const targetLeads = waLeadLimit > 0 ? filteredLeads.slice(0, waLeadLimit) : filteredLeads;
     if (targetLeads.length === 0) { alert('Nenhum lead na lista selecionada.'); return; }
     setIsSendingWA(true);
-    setWaLogs([{ type: 'info', text: `[📡] Iniciando campanha para ${targetLeads.length} leads...` }]);
+    setWaLogs([{ type: 'info', text: `[📡] Iniciando campanha para ${targetLeads.length} de ${filteredLeads.length} leads disponíveis...` }]);
     try {
       const res = await fetch(`${apiKeys.backend}/api/whatsapp/send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -643,6 +651,37 @@ function AuthenticatedApp({ user, onLogout }) {
       alert(`Erro ao cancelar: ${e.message}`);
     }
   };
+
+  // Caixa de Entrada — polling de conversas a cada 4s quando na aba whatsapp
+  useEffect(() => {
+    if (!apiKeys.backend || activeTab !== 'whatsapp') return;
+    const fetchConvs = async () => {
+      try {
+        const r = await fetch(`${apiKeys.backend}/api/whatsapp/conversations`);
+        if (r.ok) setWaConversations(await r.json());
+      } catch {}
+    };
+    fetchConvs();
+    const iv = setInterval(fetchConvs, 4000);
+    return () => clearInterval(iv);
+  }, [apiKeys.backend, activeTab]);
+
+  // Caixa de Entrada — carrega mensagens ao selecionar conversa
+  const handleSelectConv = async (conv) => {
+    setWaSelectedConv(conv);
+    try {
+      const r = await fetch(`${apiKeys.backend}/api/whatsapp/messages/${encodeURIComponent(conv.jid)}`);
+      if (r.ok) {
+        setWaConvMessages(await r.json());
+        setWaConversations(prev => prev.map(c => c.jid === conv.jid ? { ...c, unread: 0 } : c));
+      }
+    } catch {}
+  };
+
+  // Rola o chat para o final ao abrir conversa
+  useEffect(() => {
+    waMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [waConvMessages]);
   const handleCheckWaNumber = async (phone) => {
     setWaCardCheck('checking');
     try {
@@ -1431,7 +1470,28 @@ function AuthenticatedApp({ user, onLogout }) {
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Sub-abas: Disparos / Conversas */}
+              <div className="flex gap-1 border-b border-white/5 mb-0">
+                {[
+                  { id: 'disparos', label: 'Disparos' },
+                  { id: 'conversas', label: `Conversas${waConversations.some(c => c.unread > 0) ? ' 🔴' : ''}` },
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setWaSubTab(t.id)}
+                    className={`px-5 py-2.5 text-[11px] font-space uppercase tracking-widest transition-colors border-b-2 -mb-px ${
+                      waSubTab === t.id
+                        ? 'border-cyan-500 text-cyan-400'
+                        : 'border-transparent text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ABA DISPAROS */}
+              {waSubTab === 'disparos' && <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
                 {/* Coluna Esquerda — Configuração de Campanha */}
                 <Card className="bg-capta-surface-low/50 border-white/5 backdrop-blur-md p-6 space-y-5">
@@ -1462,6 +1522,60 @@ function AuthenticatedApp({ user, onLogout }) {
                       </select>
                     </div>
 
+                    {/* Seletor de Quantidade com proteção anti-bloqueio */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Quantidade de Disparos</label>
+                        <span className="text-[9px] font-mono text-slate-600">
+                          {(() => {
+                            const listMap = { qualificado: 'qualificado', contato: 'contato', all: null };
+                            const f = listMap[waSelectedList];
+                            const total = f ? leads.filter(l => l.status === f).length : leads.length;
+                            const n = waLeadLimit > 0 ? Math.min(waLeadLimit, total) : total;
+                            const secs = n * 22 + Math.floor(n / 10) * 60;
+                            const mins = Math.ceil(secs / 60);
+                            return `~${mins} min para ${n} lead${n !== 1 ? 's' : ''}`;
+                          })()}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {[
+                          { n: 10, label: '10', risk: 'safe', color: 'emerald' },
+                          { n: 20, label: '20', risk: 'safe', color: 'emerald' },
+                          { n: 30, label: '30', risk: 'mod', color: 'amber' },
+                          { n: 50, label: '50', risk: 'risk', color: 'orange' },
+                          { n: 0,  label: 'Todos', risk: 'danger', color: 'red' },
+                        ].map(({ n, label, color }) => (
+                          <button
+                            key={n}
+                            onClick={() => !isSendingWA && setWaLeadLimit(n)}
+                            disabled={isSendingWA}
+                            className={`h-9 rounded text-[10px] font-space font-bold uppercase tracking-wider transition-all border ${
+                              waLeadLimit === n
+                                ? color === 'emerald' ? 'bg-emerald-600/30 border-emerald-500/50 text-emerald-300'
+                                : color === 'amber'   ? 'bg-amber-600/30 border-amber-500/50 text-amber-300'
+                                : color === 'orange'  ? 'bg-orange-600/30 border-orange-500/50 text-orange-300'
+                                : 'bg-red-600/30 border-red-500/50 text-red-300'
+                                : 'bg-white/5 border-white/10 text-slate-500 hover:border-white/20 hover:text-slate-300'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="text-[9px] font-mono leading-relaxed px-0.5">
+                        {waLeadLimit === 0 ? (
+                          <span className="text-red-400">⛔ Risco alto — use somente em números com histórico longo de uso.</span>
+                        ) : waLeadLimit <= 20 ? (
+                          <span className="text-emerald-500">✔ Seguro — recomendado para uso diário sem risco de bloqueio.</span>
+                        ) : waLeadLimit <= 30 ? (
+                          <span className="text-amber-400">⚠ Moderado — aceitável para números com +3 meses de uso ativo.</span>
+                        ) : (
+                          <span className="text-orange-400">⚠ Limite alto — use com cautela. Intervalo automático de 60s aplicado.</span>
+                        )}
+                      </div>
+                    </div>
+
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
                         <label className="text-[10px] font-space text-slate-500 uppercase tracking-widest">Mensagem (use [NOME])</label>
@@ -1475,6 +1589,45 @@ function AuthenticatedApp({ user, onLogout }) {
                         disabled={isSendingWA}
                       />
                     </div>
+
+                    {/* Resumo de tempo estimado */}
+                    {(() => {
+                      const listMap = { qualificado: 'qualificado', contato: 'contato', all: null };
+                      const f = listMap[waSelectedList];
+                      const available = f ? leads.filter(l => l.status === f).length : leads.length;
+                      const n = waLeadLimit > 0 ? Math.min(waLeadLimit, available) : available;
+                      const avgDelay = 22; // segundos médios entre envios
+                      const pausas = Math.floor(n / 10);
+                      const totalSecs = n * avgDelay + pausas * 60;
+                      const mins = Math.floor(totalSecs / 60);
+                      const secs = totalSecs % 60;
+                      const tempoStr = mins > 0 ? `${mins}min ${secs > 0 ? secs + 's' : ''}`.trim() : `${secs}s`;
+                      return (
+                        <div className="rounded-lg border border-white/8 bg-black/20 px-4 py-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-space uppercase tracking-widest text-slate-500">Resumo do Lote</span>
+                            <span className="text-[10px] font-mono text-cyan-400">⏱ ~{tempoStr}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-white/5 rounded px-2 py-1.5">
+                              <div className="text-[15px] font-space font-bold text-white">{n}</div>
+                              <div className="text-[8px] font-mono text-slate-600 uppercase">leads</div>
+                            </div>
+                            <div className="bg-white/5 rounded px-2 py-1.5">
+                              <div className="text-[15px] font-space font-bold text-amber-400">{pausas}</div>
+                              <div className="text-[8px] font-mono text-slate-600 uppercase">pausas 60s</div>
+                            </div>
+                            <div className="bg-white/5 rounded px-2 py-1.5">
+                              <div className="text-[15px] font-space font-bold text-cyan-400">~{tempoStr}</div>
+                              <div className="text-[8px] font-mono text-slate-600 uppercase">duração</div>
+                            </div>
+                          </div>
+                          <div className="text-[9px] font-mono text-slate-600 leading-relaxed">
+                            Delay médio 15–30s/msg · pausa de 60s a cada 10 envios
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <button
                       onClick={handleStartWaCampaign}
@@ -1551,7 +1704,115 @@ function AuthenticatedApp({ user, onLogout }) {
                     </div>
                   )}
                 </div>
-              </div>
+              </div>}
+
+              {/* ABA CONVERSAS — layout estilo WhatsApp Web */}
+              {waSubTab === 'conversas' && (
+                <div className="rounded-xl border border-white/5 overflow-hidden bg-capta-surface-low/30" style={{ height: 'calc(100vh - 260px)', minHeight: 500 }}>
+                  <div className="grid h-full" style={{ gridTemplateColumns: '300px 1fr' }}>
+
+                    {/* Sidebar de conversas */}
+                    <div className="flex flex-col border-r border-white/5 h-full">
+                      <div className="px-4 py-3 border-b border-white/5 bg-white/5">
+                        <div className="text-[10px] font-space uppercase tracking-widest text-slate-400 mb-2">Conversas</div>
+                        <div className="text-[9px] font-mono text-slate-600">{waConversations.length} contato{waConversations.length !== 1 ? 's' : ''}</div>
+                      </div>
+                      <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        {waConversations.length === 0 ? (
+                          <div className="p-5 text-[11px] font-mono text-slate-700 italic leading-relaxed">
+                            {waStatus.connected
+                              ? 'Nenhuma conversa ainda.\nAs mensagens aparecem aqui em tempo real.'
+                              : 'Conecte o WhatsApp\npara ver conversas.'}
+                          </div>
+                        ) : (
+                          waConversations.map(conv => {
+                            const isActive = waSelectedConv?.jid === conv.jid;
+                            const hora = conv.lastTimestamp
+                              ? new Date(conv.lastTimestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                              : '';
+                            return (
+                              <button
+                                key={conv.jid}
+                                onClick={() => handleSelectConv(conv)}
+                                className={`w-full text-left px-4 py-3.5 border-b border-white/5 transition-colors flex items-center gap-3 ${isActive ? 'bg-cyan-500/10' : 'hover:bg-white/5'}`}
+                              >
+                                {/* Avatar */}
+                                <div className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-sm font-bold ${isActive ? 'bg-cyan-500/30 text-cyan-300' : 'bg-white/10 text-slate-400'}`}>
+                                  {conv.name?.[0]?.toUpperCase() || '#'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-1 mb-0.5">
+                                    <span className="text-[12px] font-space text-white truncate">{conv.name}</span>
+                                    <span className="text-[9px] font-mono text-slate-600 shrink-0">{hora}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="text-[10px] font-mono text-slate-500 truncate">{conv.lastMessage}</span>
+                                    {conv.unread > 0 && (
+                                      <span className="text-[9px] bg-emerald-500 text-black font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 shrink-0">{conv.unread}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Painel de mensagens */}
+                    <div className="flex flex-col h-full bg-black/10">
+                      {!waSelectedConv ? (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
+                          <MessageSquare size={40} className="text-slate-700" />
+                          <div className="text-[12px] font-space text-slate-600 uppercase tracking-widest">Selecione uma conversa</div>
+                          <div className="text-[10px] font-mono text-slate-700">Clique em um contato para ver as mensagens</div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Header do chat */}
+                          <div className="px-5 py-3 border-b border-white/5 bg-white/5 flex items-center gap-3 shrink-0">
+                            <div className="w-9 h-9 rounded-full bg-cyan-500/20 flex items-center justify-center text-sm font-bold text-cyan-300">
+                              {waSelectedConv.name?.[0]?.toUpperCase() || '?'}
+                            </div>
+                            <div>
+                              <div className="text-[13px] font-space text-white">{waSelectedConv.name}</div>
+                              <div className="text-[9px] font-mono text-slate-500">+{waSelectedConv.jid.split('@')[0]}</div>
+                            </div>
+                          </div>
+
+                          {/* Mensagens */}
+                          <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-2"
+                            style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.02) 1px, transparent 0)', backgroundSize: '24px 24px' }}>
+                            {waConvMessages.length === 0 ? (
+                              <div className="text-center text-[10px] font-mono text-slate-700 mt-10">Nenhuma mensagem carregada.</div>
+                            ) : (
+                              waConvMessages.map((msg, i) => (
+                                <div key={i} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
+                                  <div className={`max-w-[65%] px-3.5 py-2 text-[12px] font-mono leading-relaxed shadow-sm ${
+                                    msg.fromMe
+                                      ? 'bg-emerald-600/25 border border-emerald-500/25 text-emerald-100 rounded-2xl rounded-br-sm'
+                                      : 'bg-white/8 border border-white/10 text-slate-200 rounded-2xl rounded-bl-sm'
+                                  }`}>
+                                    <div>{msg.text}</div>
+                                    {msg.timestamp && (
+                                      <div className={`text-[9px] opacity-40 mt-1 ${msg.fromMe ? 'text-right' : 'text-left'}`}>
+                                        {new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                            <div ref={waMessagesEndRef} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
 
