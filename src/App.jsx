@@ -198,7 +198,6 @@ function AuthenticatedApp({ user, onLogout }) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newLeadData, setNewLeadData] = useState({ name: '', contact: '', socio: '', loc: '', status: 'leads' });
   const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
-  const [waProgress, setWaProgress] = useState({ processed: 0, total: 0 });
 
   const [attachDropdown, setAttachDropdown] = useState(false);
   const [attachUrlInput, setAttachUrlInput] = useState('');
