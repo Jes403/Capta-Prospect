@@ -1,58 +1,74 @@
-# Capta Prospect — Guia de Instalação
+# Capta Prospect — Como colocar em outra máquina
+
+Existem **dois perfis** de quem vai usar isso. Leia só a seção que te corresponde.
 
 ---
 
-## Para o Cliente (instalação simples)
+## Sou CLIENTE (vou usar o sistema, não desenvolver)
 
-### O que você precisa
+> Você recebeu um arquivo ZIP e um pendrive com o banco de dados. É isso.
 
-- **Node.js** instalado — [nodejs.org](https://nodejs.org) → baixar versão LTS
-- O arquivo `receita_federal.db` (enviado via pendrive pelo desenvolvedor)
+### O que instalar (só uma vez na vida)
 
-### Passo a passo
+**Node.js** — é o motor que roda o sistema.
+1. Acesse: https://nodejs.org
+2. Clique no botão verde **"LTS"** e instale normalmente (Next, Next, Finish).
 
-**1. Extraia o arquivo ZIP** em qualquer pasta do computador.
+### O que fazer
 
-**2. Copie o banco de dados** da Receita Federal:
-- Coloque o arquivo `receita_federal.db` dentro da pasta `data\` que está dentro da pasta extraída.
-- Se a pasta `data\` não existir, crie ela.
+**1.** Descompacte o arquivo `capta-prospect-cliente.zip` em qualquer pasta.
 
-**3. Clique duas vezes em `iniciar_cliente.bat`**
-- Na primeira vez, ele instala as dependências automaticamente (pode demorar alguns minutos).
-- Depois abre o sistema no navegador em `http://localhost:3007` automaticamente.
+**2.** Pegue o arquivo `receita_federal.db` do pendrive e coloque dentro da pasta `data\`
+que está dentro da pasta que você acabou de descompactar.
+*(Se a pasta `data\` não existir, crie ela manualmente.)*
 
-**4. WhatsApp:** ao iniciar aparece um QR Code na janela do servidor — escaneie com o celular.
+**3.** Clique duas vezes em `iniciar_cliente.bat`.
+Na **primeira vez** ele vai instalar os componentes automaticamente — pode demorar
+uns 3 minutos, não feche a janela.
 
-> Se algo não funcionar, acesse `http://localhost:3007/status` para ver o diagnóstico do sistema.
+**4.** O navegador abre sozinho em `http://localhost:3007`. Pronto.
+
+**WhatsApp:** na janela preta que fica aberta, vai aparecer um QR Code.
+Abra o WhatsApp no celular → Aparelhos conectados → Conectar → escaneie.
+
+### Se algo não funcionar
+
+Abra o navegador e acesse: `http://localhost:3007/status`
+
+Vai aparecer uma tela dizendo exatamente o que está ok e o que falta.
 
 ---
 
-## Para o Desenvolvedor (ambiente de desenvolvimento)
+## Sou DESENVOLVEDOR (vou editar o código)
 
-### Pré-requisitos
+> Você vai clonar o repositório e rodar em modo de desenvolvimento.
 
-- Node.js 18+ — [nodejs.org](https://nodejs.org)
-- Git — [git-scm.com](https://git-scm.com)
-- Conta no Convex — [convex.dev](https://convex.dev)
+### O que instalar
 
-### Passo 1 — Clonar e instalar
+- **Node.js** → https://nodejs.org (versão LTS)
+- **Git** → https://git-scm.com
 
-```powershell
+### Passo 1 — Baixar o projeto
+
+Abra o terminal (PowerShell) e rode:
+```
 git clone https://github.com/Jes403/Capta-Prospect.git
 cd Capta-Prospect
 npm install
 ```
 
-### Passo 2 — Criar os arquivos de ambiente
+### Passo 2 — Criar os arquivos de configuração
 
-**`.env`** (copie o `.env.example` e renomeie):
-```
-PORT=3007
-GEMINI_API_KEY=AIzaSyAfw6Dx_zLagO_lQm9CHRwYS3IHb7Rbt_0
-CONVEX_DEPLOYMENT=accurate-tiger-693
-```
+O projeto precisa de dois arquivos que **não estão no GitHub** (por segurança).
 
-**`.env.local`** (para o Convex):
+**Arquivo 1 — `.env`** (configurações do servidor)
+
+Copie o arquivo `.env.example` e renomeie para `.env`.
+Ele já vem preenchido com as chaves necessárias.
+
+**Arquivo 2 — `.env.local`** (conexão com o banco Convex)
+
+Crie um arquivo chamado `.env.local` com este conteúdo:
 ```
 VITE_CONVEX_URL=https://accurate-tiger-693.convex.cloud
 CONVEX_DEPLOYMENT=dev:accurate-tiger-693
@@ -61,29 +77,23 @@ VITE_CONVEX_SITE_URL=https://accurate-tiger-693.convex.site
 
 ### Passo 3 — Banco da Receita Federal
 
-Copie via pendrive para `data/receita_federal.db` (~4.1 GB).
+Copie o arquivo `receita_federal.db` (4.1 GB) via pendrive para dentro da pasta `data\`.
 
-### Passo 4 — Rodar em desenvolvimento
+### Passo 4 — Rodar o sistema
 
-Clique duas vezes em **`iniciar.bat`** — abre automaticamente:
-- Terminal do Convex (sincroniza funções com a nuvem)
-- Terminal do servidor backend + frontend
+Clique duas vezes em **`iniciar.bat`**.
 
-Ou manualmente:
-```powershell
-# Terminal 1
-npx convex dev
-
-# Terminal 2
-node server/index.js
-```
+Ele abre dois terminais:
+- Um para o **Convex** (sincroniza o banco em nuvem)
+- Um para o **servidor** (roda o sistema na porta 3007)
 
 Acesse: `http://localhost:3007`
 
-### Gerar pacote para cliente
+### Passo 5 — Gerar pacote para entregar ao cliente
 
-```powershell
+Quando quiser gerar um novo ZIP para entregar:
+```
 powershell -ExecutionPolicy Bypass -File gerar_pacote_cliente.ps1
 ```
 
-Isso compila o frontend, monta a pasta `capta-prospect-cliente\` e cria o `.zip` pronto para enviar.
+Isso compila o frontend e monta a pasta `capta-prospect-cliente\` pronta para zipar e enviar.
