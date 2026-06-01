@@ -30,6 +30,12 @@ auth
 auth-wal
 
 # ==========================
+# EXPORTAÇÃO DE DADOS (SENSÍVEL)
+# ==========================
+leads_export.json
+gmn_leads_storage.json
+
+# ==========================
 # SESSÃO DO WHATSAPP (PESADO E PESSOAL)
 # ==========================
 wa_session/
