@@ -73,7 +73,6 @@ function getSystemHealth() {
 app.get('/api/health', (req, res) => res.json(getSystemHealth()));
 app.get('/health', (req, res) => res.json(getSystemHealth()));
 
-app.get('/', (req, res) => res.send('Capta Prospect Engine - Status: OK'));
 
 // Setup multer para Uploads
 const upload = multer({ dest: path.join(__dirname, 'uploads/') });
