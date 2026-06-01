@@ -117,21 +117,34 @@ Se quiser migrar os leads do Convex antigo:
 
 ---
 
-## Passo 8 — Rodar o Projeto
+## Passo 8 — Compilar o Frontend
 
-Abra **dois terminais**:
-
-**Terminal 1 — Backend:**
 ```powershell
-node backend/index.js
+npm run build
 ```
 
-**Terminal 2 — Frontend:**
+> Isso gera a pasta `dist/` que o backend serve automaticamente.
+
+---
+
+## Passo 9 — Rodar o Projeto
+
+Abra **um terminal** e execute:
+
 ```powershell
-npm run dev
+node server/index.js
 ```
 
-Acesse: [http://localhost:5173](http://localhost:5173)
+Acesse: [http://localhost:3007](http://localhost:3007)
+
+> O servidor já serve o frontend compilado **e** o backend na mesma porta.  
+> O QR Code do WhatsApp aparecerá no terminal ao iniciar.
+
+**Modo desenvolvimento** (frontend com hot-reload):
+
+Abra dois terminais:
+- Terminal 1: `node server/index.js`
+- Terminal 2: `npm run dev` → acesse [http://localhost:5173](http://localhost:5173)
 
 ---
 
