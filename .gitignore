@@ -77,6 +77,24 @@ scratch/
 fix_backend.js
 
 # ==========================
+# GERADO / DISTRIBUICAO (nao commitar)
+# ==========================
+capta-prospect-cliente/
+capta-prospect-cliente.zip
+
+# ==========================
+# CHAVES E SEGREDOS
+# ==========================
+scripts/keys.txt
+**/keys.txt
+
+# ==========================
+# CONVEX AUTH LOCAL
+# ==========================
+auth
+auth-wal
+
+# ==========================
 # PUPPETEER (CACHE DO BROWSER)
 # ==========================
 .cache/
