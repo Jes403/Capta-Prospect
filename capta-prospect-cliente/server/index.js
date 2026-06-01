@@ -1032,49 +1032,6 @@ app.get('/api/whatsapp/messages/:jid', (req, res) => {
 
 // --- FIM — MOTOR DE DISPAROS WHATSAPP (BAILEYS) ---
 
-// Página de diagnóstico — acessível em /status
-app.get('/status', (req, res) => {
-  const h = getSystemHealth();
-  const cor = (ok) => ok ? '#22c55e' : '#ef4444';
-  const icone = (ok) => ok ? '✅' : '❌';
-  res.send(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-  <title>Capta Prospect — Status</title>
-  <style>
-    body{font-family:sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-    .card{background:#1e293b;border-radius:12px;padding:32px 40px;max-width:480px;width:100%}
-    h1{margin:0 0 8px;font-size:22px;color:#38bdf8}
-    p{margin:0 0 24px;color:#94a3b8;font-size:14px}
-    .item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #334155}
-    .item:last-child{border:none}
-    .label{flex:1;font-size:15px}
-    .badge{font-size:13px;font-weight:600;padding:3px 10px;border-radius:999px;background:#0f172a}
-  </style></head><body><div class="card">
-  <h1>Capta Prospect</h1>
-  <p>Diagnóstico do sistema</p>
-  <div class="item">
-    <span>${icone(h.receita_federal === 'ok')}</span>
-    <span class="label">Banco Receita Federal</span>
-    <span class="badge" style="color:${cor(h.receita_federal === 'ok')}">${h.receita_federal === 'ok' ? 'OK' : 'AUSENTE'}</span>
-  </div>
-  <div class="item">
-    <span>${icone(h.gemini === 'ok')}</span>
-    <span class="label">Chave Gemini (IA)</span>
-    <span class="badge" style="color:${cor(h.gemini === 'ok')}">${h.gemini === 'ok' ? 'OK' : 'SEM CHAVE'}</span>
-  </div>
-  <div class="item">
-    <span>${icone(h.whatsapp === 'conectado')}</span>
-    <span class="label">WhatsApp</span>
-    <span class="badge" style="color:${cor(h.whatsapp === 'conectado')}">${h.whatsapp.toUpperCase()}</span>
-  </div>
-  <div class="item">
-    <span>⏱️</span>
-    <span class="label">Servidor online há</span>
-    <span class="badge" style="color:#38bdf8">${Math.floor(h.uptime / 60)}min ${h.uptime % 60}s</span>
-  </div>
-  ${h.problemas.length ? `<div style="margin-top:20px;padding:12px;background:#450a0a;border-radius:8px;font-size:13px;color:#fca5a5">${h.problemas.map(p => `⚠️ ${p}`).join('<br>')}</div>` : '<div style="margin-top:20px;padding:12px;background:#052e16;border-radius:8px;font-size:13px;color:#86efac">✅ Tudo funcionando corretamente</div>'}
-  </div></body></html>`);
-});
-
 // Serve o frontend compilado (pasta dist/) — usado na distribuição para clientes
 const distPath = path.join(__dirname, '../dist');
 if (fs.existsSync(distPath)) {

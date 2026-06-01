@@ -1,85 +1,112 @@
 @echo off
-title CAPTA PROSPECT
+title CAPTA PROSPECT - Iniciando...
 color 0A
+cls
 
 echo.
-echo  ================================================
-echo    CAPTA PROSPECT - SISTEMA DE PROSPECCAO B2B
-echo  ================================================
+echo  =====================================================
+echo    CAPTA PROSPECT  -  Sistema de Prospeccao B2B
+echo  =====================================================
 echo.
 
-:: Verifica se o Node.js esta instalado
+:: ── 1. Node.js ────────────────────────────────────────
 where node >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
-    echo  [ERRO] Node.js nao encontrado!
+    echo  [ERRO] Node.js nao esta instalado!
     echo.
-    echo  Instale o Node.js em: https://nodejs.org
-    echo  Baixe a versao LTS e instale normalmente.
+    echo  Acesse: https://nodejs.org
+    echo  Baixe a versao LTS e instale.
+    echo  Depois execute este arquivo novamente.
     echo.
     pause
     exit /b
 )
+echo  [OK] Node.js encontrado.
 
-:: Verifica se as dependencias estao instaladas
+:: ── 2. Dependencias ───────────────────────────────────
 if not exist "node_modules" (
-    echo  [!] Instalando dependencias pela primeira vez...
-    echo      Isso pode demorar alguns minutos. Nao feche esta janela!
     echo.
-    npm install
+    echo  [!] Primeira execucao: instalando dependencias...
+    echo      Aguarde, isso leva alguns minutos.
     echo.
+    npm install --silent
+    if %errorlevel% neq 0 (
+        color 0C
+        echo.
+        echo  [ERRO] Falha ao instalar dependencias.
+        echo  Verifique sua conexao com a internet e tente novamente.
+        echo.
+        pause
+        exit /b
+    )
+    echo  [OK] Dependencias instaladas.
 )
 
-:: Verifica se o .env existe
+:: ── 3. Arquivo .env ────────────────────────────────────
 if not exist ".env" (
     color 0C
+    echo.
     echo  [ERRO] Arquivo .env nao encontrado!
     echo.
-    echo  Copie o arquivo .env que foi fornecido junto com o sistema
-    echo  e coloque na mesma pasta que este arquivo .bat
+    echo  Renomeie o arquivo ".env.example" para ".env"
+    echo  e preencha com suas chaves de API.
     echo.
     pause
     exit /b
 )
+echo  [OK] Configuracoes encontradas.
 
-:: Avisa se o banco da Receita Federal nao estiver presente
+:: ── 4. Banco de dados ──────────────────────────────────
 if not exist "data\receita_federal.db" (
+    echo.
     color 0E
-    echo  [AVISO] Banco da Receita Federal nao encontrado!
+    echo  [AVISO] Banco da Receita Federal nao encontrado.
     echo.
-    echo  O sistema vai funcionar normalmente, MAS a funcionalidade
-    echo  de Extracao (Receita Federal) estara desativada.
-    echo.
-    echo  Para ativar: copie o arquivo "receita_federal.db"
-    echo  para a pasta "data\" dentro desta pasta.
+    echo  A extracao de empresas estara desativada.
+    echo  Para ativar: copie "receita_federal.db" para a pasta "data\".
     echo.
     color 0A
-    echo  Iniciando sem o banco da Receita...
-    echo.
-    timeout /t 4 /nobreak >nul
+    timeout /t 3 /nobreak >nul
+) else (
+    echo  [OK] Banco da Receita Federal encontrado.
 )
 
-echo  [OK] Tudo pronto! Iniciando...
+:: ── 5. Encerra processo antigo se ainda estiver rodando
 echo.
+echo  Verificando porta 3007...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3007 " 2^>nul') do (
+    taskkill /PID %%a /F >nul 2>&1
+)
 
-:: Abre o backend (que ja serve o frontend tambem)
-start "CAPTA PROSPECT - Servidor" cmd /k "title CAPTA PROSPECT - Servidor && color 0A && node server/index.js"
+:: ── 6. Inicia o servidor ───────────────────────────────
+echo  Iniciando servidor...
+echo.
+start "CAPTA PROSPECT" cmd /k "color 0A && title CAPTA PROSPECT - Servidor && echo. && echo  Servidor iniciando, aguarde... && echo. && node server/index.js"
 
-:: Aguarda o servidor subir
-timeout /t 4 /nobreak >nul
+:: ── 7. Aguarda e abre o navegador ─────────────────────
+echo  Aguardando servidor ficar pronto...
+timeout /t 5 /nobreak >nul
 
-:: Abre o navegador automaticamente
-echo  Abrindo o sistema no navegador...
+:aguarda
+curl -s http://localhost:3007/api/health >nul 2>&1
+if %errorlevel% neq 0 (
+    timeout /t 2 /nobreak >nul
+    goto aguarda
+)
+
+echo  [OK] Servidor pronto!
+echo.
+echo  Abrindo no navegador...
 start http://localhost:3007
 
 echo.
-echo  ================================================
-echo   Sistema iniciado!
+echo  =====================================================
+echo   Sistema iniciado em: http://localhost:3007
 echo.
-echo   Acesse: http://localhost:3007
+echo   Para o QR do WhatsApp, veja a outra janela.
+echo   Nao feche a janela "CAPTA PROSPECT - Servidor"!
+echo  =====================================================
 echo.
-echo   IMPORTANTE: Para escanear o QR do WhatsApp,
-echo   olhe a janela "CAPTA PROSPECT - Servidor"
-echo  ================================================
-echo.
-pause
+timeout /t 5 /nobreak >nul
+exit
