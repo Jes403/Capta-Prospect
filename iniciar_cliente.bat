@@ -7,8 +7,6 @@ echo  ================================================
 echo    CAPTA PROSPECT - SISTEMA DE PROSPECCAO B2B
 echo  ================================================
 echo.
-echo  Iniciando o sistema... Aguarde!
-echo.
 
 :: Verifica se o Node.js esta instalado
 where node >nul 2>&1
@@ -42,6 +40,23 @@ if not exist ".env" (
     echo.
     pause
     exit /b
+)
+
+:: Avisa se o banco da Receita Federal nao estiver presente
+if not exist "data\receita_federal.db" (
+    color 0E
+    echo  [AVISO] Banco da Receita Federal nao encontrado!
+    echo.
+    echo  O sistema vai funcionar normalmente, MAS a funcionalidade
+    echo  de Extracao (Receita Federal) estara desativada.
+    echo.
+    echo  Para ativar: copie o arquivo "receita_federal.db"
+    echo  para a pasta "data\" dentro desta pasta.
+    echo.
+    color 0A
+    echo  Iniciando sem o banco da Receita...
+    echo.
+    timeout /t 4 /nobreak >nul
 )
 
 echo  [OK] Tudo pronto! Iniciando...

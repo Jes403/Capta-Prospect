@@ -32,37 +32,46 @@ const DATA_DIR = path.dirname(DB_FILE);
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
-const db = new Database(DB_FILE);
+let db = null;
+const DB_EXISTS = fs.existsSync(DB_FILE);
 
-// --- DIAGNÓSTICO DE INICIALIZAÇÃO ---
-try {
-  console.log('--- [🕵️‍♂️] TESTE DE INTEGRIDADE DO BANCO ---');
-  const sample = db.prepare("SELECT * FROM estabelecimentos LIMIT 2").all();
-  console.log('Conexão SQLite OK. Amostra de dados encontrada:', JSON.stringify(sample, null, 2));
-  console.log('--- [✅] FIM DO DIAGNÓSTICO ---');
-} catch (e) {
-  console.error('--- [❌] ERRO AO LER O BANCO:', e.message);
+if (DB_EXISTS) {
+  db = new Database(DB_FILE);
+  try {
+    const sample = db.prepare("SELECT * FROM estabelecimentos LIMIT 2").all();
+    console.log(`[✅] Banco Receita Federal OK — ${sample.length} registros de amostra encontrados.`);
+  } catch (e) {
+    console.error('[❌] Banco encontrado mas tabela "estabelecimentos" ausente:', e.message);
+  }
+} else {
+  console.warn('[⚠️] AVISO: receita_federal.db não encontrado em:', DB_FILE);
+  console.warn('[⚠️] Funcionalidades de Extração (Receita Federal) estarão desativadas.');
+  console.warn('[⚠️] Copie o arquivo para a pasta "data/" e reinicie o servidor.');
 }
 
 const app = express();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'DELETE', 'OPTIONS'] }));
 app.use(express.json());
 
-app.get('/api/health', (req, res) => {
-  const dbStatus = fs.existsSync(DB_FILE) ? 'connected' : 'not_found';
-  res.json({ 
-    status: 'online', 
-    uptime: process.uptime(),
-    db: dbStatus,
+function getSystemHealth() {
+  const dbPresente = fs.existsSync(DB_FILE);
+  const geminiOk = !!process.env.GEMINI_API_KEY;
+  const problemas = [];
+  if (!dbPresente) problemas.push('Banco receita_federal.db ausente — copie para a pasta data/');
+  if (!geminiOk) problemas.push('GEMINI_API_KEY não configurada no .env — qualificação desativada');
+  return {
+    status: 'online',
+    uptime: Math.floor(process.uptime()),
+    receita_federal: dbPresente ? 'ok' : 'ausente',
+    gemini: geminiOk ? 'ok' : 'sem chave',
+    whatsapp: getStatus().connected ? 'conectado' : 'desconectado',
+    problemas,
     timestamp: new Date().toISOString()
-  });
-});
+  };
+}
 
-// Alias para compatibilidade com o frontend antigo
-app.get('/health', (req, res) => {
-  const dbStatus = fs.existsSync(DB_FILE) ? 'connected' : 'not_found';
-  res.json({ status: 'online', uptime: process.uptime(), db: dbStatus });
-});
+app.get('/api/health', (req, res) => res.json(getSystemHealth()));
+app.get('/health', (req, res) => res.json(getSystemHealth()));
 
 app.get('/', (req, res) => res.send('Capta Prospect Engine - Status: OK'));
 
@@ -540,8 +549,11 @@ const NICHE_CONFIG = {
   }
 };
 
+const DB_AUSENTE = { error: 'Banco de dados da Receita Federal não encontrado. Copie o arquivo receita_federal.db para a pasta data/ e reinicie o servidor.', db_ausente: true };
+
 // GET /api/receita/count — retorna total de registros para os filtros (sem trazer dados)
 app.post('/api/receita/count', (req, res) => {
+  if (!db) return res.status(503).json(DB_AUSENTE);
   const { uf, cidade, bairro, cnae, segmento } = req.body;
   try {
     const upperCidade = normalizeString(cidade);
@@ -562,6 +574,7 @@ app.post('/api/receita/count', (req, res) => {
 });
 
 app.post('/api/receita/scan', async (req, res) => {
+  if (!db) return res.status(503).json(DB_AUSENTE);
   const { uf, cidade, bairro, cnae, segmento, limit: reqLimit, offset: reqOffset } = req.body;
   const scanLimit = Math.min(parseInt(reqLimit) || 100, 500); // máx 500
   const scanOffset = parseInt(reqOffset) || 0;
