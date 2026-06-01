@@ -1,102 +1,93 @@
-# 🎯 CAPTA PROSPECT
+# Capta Prospect
 ### Sistema de Prospecção B2B — Local-First
 
 > Mineração de leads via Receita Federal, Google Maps e automação de WhatsApp com IA.
 
 ---
 
-## 📚 Documentação Completa
+## Início Rápido
 
-Toda a documentação está organizada passo a passo. **Siga na ordem:**
+### Já tenho o projeto e quero atualizar
 
-| # | Documento | Descrição |
-|---|---|---|
-| 1 | [📥 Instalação (Node.js e Git)](./docs/01-instalacao.md) | Instale os programas necessários |
-| 2 | [⚙️ Configuração (Primeiro Uso)](./docs/02-configuracao.md) | Clone o projeto e configure |
-| 3 | [🚀 Como Usar (Dia a Dia)](./docs/03-como-usar.md) | Inicie os 3 terminais e use o sistema |
-| 4 | [🛠️ Solução de Problemas](./docs/04-problemas.md) | Erros comuns e como resolver |
-
----
-
-## ⚡ Início Rápido (Se já configurou antes)
-
-1. Dê **duplo clique** no arquivo **`iniciar.bat`**
-2. Aguarde os **3 terminais** ficarem prontos
-3. Acesse **http://localhost:5173** no Chrome
-
----
-
-## 🏗️ Arquitetura do Sistema
-
-O sistema roda **3 serviços simultaneamente** no seu computador:
+Abra o terminal na pasta do projeto e rode:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    CAPTA PROSPECT                        │
-├──────────────────┬──────────────────┬───────────────────┤
-│  TERMINAL 1      │   TERMINAL 2     │   TERMINAL 3      │
-│  🟦 Convex Dev   │   🟨 Backend     │   🟩 Frontend     │
-│  npx convex dev  │   npm run server │   npm run dev     │
-│  Banco de Dados  │   Motor Porta    │   Interface Web   │
-│  em Tempo Real   │   3006           │   localhost:5173  │
-└──────────────────┴──────────────────┴───────────────────┘
+git pull
 ```
 
----
-
-## 🔧 Funcionalidades
-
-- **🔍 Mineração Receita Federal** — Base local com 11M+ empresas filtradas pelo Crivo LDR
-- **🗺️ Mineração Google Maps** — Busca automática com avaliações e notas
-- **🤖 Crivo LDR** — Validação automática: site ativo, reputação GMN, e-mail corporativo
-- **📋 CRM Kanban** — Pipeline de vendas com drag & drop
-- **📱 Automação WhatsApp** — Disparos personalizados com acompanhamento em tempo real
-- **🧠 IA Gemini** — Qualificação inteligente de leads
+Depois clique duas vezes em **`iniciar.bat`** (desenvolvedor) ou **`iniciar_cliente.bat`** (cliente).
 
 ---
 
-## 📋 Pré-Requisitos
+### Primeira vez — quero instalar do zero
 
-| Programa | Download | Versão Mínima |
-|---|---|---|
-| Node.js | https://nodejs.org/en/download | v18+ |
-| Git | https://git-scm.com/downloads | Qualquer |
-| Google Chrome | https://www.google.com/chrome | Qualquer |
+Siga o guia: [SETUP_NOVA_MAQUINA.md](./SETUP_NOVA_MAQUINA.md)
 
 ---
 
-## 📁 Estrutura do Projeto
+## Como funciona
+
+O sistema roda **em 1 só porta** no seu computador.
+
+```
+┌─────────────────────────────────────────┐
+│           CAPTA PROSPECT                │
+│                                         │
+│  node server/index.js                   │
+│                                         │
+│  Frontend + Backend + API               │
+│  http://localhost:3007                  │
+└─────────────────────────────────────────┘
+```
+
+- **Desenvolvedor** → clica em `iniciar.bat` (abre Convex + servidor)
+- **Cliente** → clica em `iniciar_cliente.bat` (abre só o servidor)
+
+---
+
+## Funcionalidades
+
+- **Mineração Receita Federal** — Base local com milhões de empresas
+- **Mineração Google Maps** — Busca automática com avaliações
+- **Qualificação por IA** — Gemini analisa site, e-mail e sócio da empresa
+- **CRM Kanban** — Pipeline de vendas com drag & drop
+- **Automação WhatsApp** — Disparos personalizados com acompanhamento
+- **Caixa de Entrada WhatsApp** — Leitura de mensagens recebidas
+
+---
+
+## Pré-Requisitos
+
+| Programa | Download |
+|---|---|
+| Node.js (LTS) | https://nodejs.org |
+| Git | https://git-scm.com |
+
+---
+
+## Estrutura do Projeto
 
 ```
 Capta-Prospect/
-├── 📄 iniciar.bat          ← Inicia tudo com 1 clique (Windows)
-├── 📄 .env.example         ← Template de configuração
-├── 📁 docs/                ← Documentação completa
-│   ├── 01-instalacao.md
-│   ├── 02-configuracao.md
-│   ├── 03-como-usar.md
-│   └── 04-problemas.md
-├── 📁 server/              ← Backend (Motor de Mineração)
-│   └── index.js
-├── 📁 scripts/             ← Scripts de automação
-│   └── ldr_validator.js    ← Crivo LDR
-├── 📁 src/                 ← Frontend (Interface)
-│   └── App.jsx
-├── 📁 convex/              ← Banco de Dados em Nuvem
-└── 📁 data/                ← Banco Local (receita_federal.db)
-    └── ⚠️ receita_federal.db (entregue separadamente)
+├── iniciar.bat              ← Desenvolvedor: inicia Convex + servidor
+├── iniciar_cliente.bat      ← Cliente: inicia só o servidor
+├── gerar_pacote_cliente.ps1 ← Gera o ZIP para entregar ao cliente
+├── .env.example             ← Configurações (copie e renomeie para .env)
+├── server/
+│   ├── index.js             ← Servidor principal (porta 3007)
+│   └── whatsapp.js          ← Integração WhatsApp (Baileys)
+├── src/                     ← Frontend React
+├── convex/                  ← Banco de dados em nuvem (Convex)
+└── data/
+    └── receita_federal.db   ← Banco local (entregue separadamente, ~4GB)
 ```
 
 ---
 
-## ⚠️ Arquivo do Banco de Dados
+## Diagnóstico
 
-O arquivo `receita_federal.db` **não está no GitHub** por ser muito grande (+2GB).
-
-**Ele é entregue separadamente pelo desenvolvedor do sistema.**
-
-Coloque-o na pasta `data/` antes de usar.
+Se algo não funcionar, acesse `http://localhost:3007/status` para ver o que está ok e o que falta.
 
 ---
 
-*Capta Prospect v3.5.0 — Desenvolvido como solução de prospecção B2B local-first*
+*Capta Prospect — Prospecção B2B local-first*

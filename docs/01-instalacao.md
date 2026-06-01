@@ -1,62 +1,33 @@
-# 🖥️ Guia de Instalação — Node.js e Git
+# Instalação — Node.js e Git
 
-> Estes são os dois únicos programas que você precisa instalar antes de tudo.  
-> **Você só faz isso uma vez.**
-
----
-
-## 1️⃣ Instalando o Node.js
-
-O Node.js é o "motor" que faz o sistema funcionar.
-
-### Passo a passo:
-
-1. Acesse: **https://nodejs.org/en/download**
-2. Clique no botão verde **"LTS"** (versão estável recomendada)
-3. Baixe o instalador para Windows (`.msi`)
-4. Execute o instalador e clique em **"Next"** em todas as telas
-5. Marque a opção **"Add to PATH"** se aparecer
-6. Ao final, clique em **"Install"** e aguarde
-7. **Reinicie o computador**
-
-### Verificando se instalou corretamente:
-
-Abra o **Prompt de Comando** (CMD) e digite:
-
-```bash
-node --version
-```
-
-Se aparecer algo como `v20.0.0` (qualquer número), está instalado! ✅
+> Você só faz isso **uma vez**.
 
 ---
 
-## 2️⃣ Instalando o Git
+## 1. Instalar o Node.js
 
-O Git é o programa que vai baixar o projeto do GitHub.
+O Node.js é o motor que roda o sistema.
 
-### Passo a passo:
+1. Acesse: **https://nodejs.org**
+2. Clique no botão **"LTS"** (versão recomendada)
+3. Baixe e execute o instalador — clique em "Next" em tudo
+4. Reinicie o computador
 
-1. Acesse: **https://git-scm.com/downloads**
-2. Clique em **"Windows"**
-3. Baixe o instalador
-4. Execute e clique em **"Next"** em todas as telas (pode deixar tudo padrão)
-5. Ao final, clique em **"Install"**
-
-### Verificando se instalou corretamente:
-
-Abra o **Prompt de Comando** e digite:
-
-```bash
-git --version
-```
-
-Se aparecer algo como `git version 2.40.0`, está instalado! ✅
+**Como verificar:** abra o CMD e digite `node --version`
+Deve aparecer algo como `v20.0.0` ✅
 
 ---
 
-## ✅ Pronto!
+## 2. Instalar o Git *(só quem vai clonar o repositório)*
 
-Com Node.js e Git instalados, volte ao **README principal** e siga o próximo passo.
+Clientes que receberam o ZIP não precisam do Git.
 
-➡️ [Voltar ao README principal](../README.md)
+1. Acesse: **https://git-scm.com**
+2. Baixe e instale — pode deixar tudo no padrão
+
+**Como verificar:** abra o CMD e digite `git --version`
+Deve aparecer `git version 2.x.x` ✅
+
+---
+
+Próximo passo: [SETUP_NOVA_MAQUINA.md](../SETUP_NOVA_MAQUINA.md)

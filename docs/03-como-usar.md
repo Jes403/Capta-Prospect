@@ -1,99 +1,71 @@
-# 🚀 Como Usar o Sistema — Dia a Dia
+# Como usar o sistema — Dia a Dia
 
 ---
 
-## Iniciando o Sistema (Método Rápido)
+## Iniciando o sistema
 
-Dê um **duplo clique** no arquivo **`iniciar.bat`** na pasta do projeto.
+### Sou desenvolvedor
+Clique duas vezes em **`iniciar.bat`**.
 
-Ele abrirá **3 janelas automaticamente**. Aguarde todas ficarem prontas.
+Aguarde os dois terminais ficarem prontos:
+- Convex: aparece `✔ 1 function ready`
+- Servidor: aparece `[CAPTA-NC] Backend Master rodando na porta 3007`
 
----
+Acesse: **http://localhost:3007**
 
-## Os 3 Terminais Explicados
+### Sou cliente
+Clique duas vezes em **`iniciar_cliente.bat`**.
 
-### 🟦 Terminal 1 — CONVEX (Banco de Dados em Nuvem)
-
-**Comando:** `npx convex dev`
-
-**O que faz:** Mantém a sincronização dos seus leads e dados do CRM com a nuvem em tempo real.
-
-**Pronto quando aparecer:**
-```
-✔ Convex functions ready!
-```
+O navegador abre sozinho em **http://localhost:3007**.
 
 ---
 
-### 🟨 Terminal 2 — BACKEND (Motor de Mineração)
+## Minerando leads pela Receita Federal
 
-**Comando:** `npm run server`
-
-**O que faz:** É o "cérebro" do sistema. Faz a busca na Receita Federal, processa os leads e gerencia os disparos de WhatsApp.
-
-**Pronto quando aparecer:**
-```
-[CAPTA-NC] Backend Master rodando na porta 3006
-```
-
----
-
-### 🟩 Terminal 3 — FRONTEND (Interface do Sistema)
-
-**Comando:** `npm run dev`
-
-**O que faz:** Inicia a interface visual que você usa no navegador.
-
-**Pronto quando aparecer:**
-```
-Local: http://localhost:5173
-```
-
-➡️ **Abra o link `http://localhost:5173` no Google Chrome**
-
----
-
-## Usando o Sistema
-
-### 🔍 Minerando Leads pela Receita Federal
-
-1. Clique na aba **"Receita"** no menu
-2. Selecione o **Estado (UF)** e **Cidade**
-3. Escolha o **CNAE** (tipo de empresa) ou **Segmento**
+1. Clique na aba **"Receita"**
+2. Selecione o **Estado** e **Cidade**
+3. Escolha o **CNAE** ou **Segmento**
 4. Clique em **"Escanear"**
-5. Aguarde — os leads aparecerão na tela já filtrados pelo Crivo LDR
 
-### 🗺️ Minerando via Google Maps
+Os leads aparecem na tela já filtrados.
+
+---
+
+## Qualificando leads (busca de site, e-mail e sócio)
+
+1. Selecione os leads que quer qualificar
+2. Clique em **"Qualificar com IA"**
+3. O sistema acessa cada site e usa o Gemini para extrair informações
+
+---
+
+## Minerando via Google Maps
 
 1. Clique na aba **"Maps"**
-2. Digite a **palavra-chave** (ex: "clínica odontológica")
-3. Digite a **localização** (ex: "São Paulo, SP")
+2. Digite a palavra-chave (ex: "clínica odontológica")
+3. Digite a cidade (ex: "São Paulo, SP")
 4. Clique em **"Iniciar Mineração"**
-5. Acompanhe os leads chegando em tempo real no console
 
-### 📋 Gerenciando Leads no CRM (Kanban)
+---
+
+## CRM — Gerenciando leads
 
 1. Clique na aba **"CRM"**
-2. Arraste os cards entre as colunas:
-   - **Novos Leads** → **Em Contato** → **Qualificados** → **Fechamento**
-3. Clique em qualquer lead para ver detalhes e editar
-
-### 📱 Disparando Mensagens no WhatsApp
-
-1. Mova os leads que deseja contatar para a coluna **"Qualificados"**
-2. Clique na aba **"WhatsApp"**
-3. Edite o template da mensagem (use `[NOME]` para personalização automática)
-4. Clique em **"Iniciar Disparos em Massa"**
-5. Uma janela do Chrome abrirá com o WhatsApp Web
-6. **Escaneie o QR Code** com seu celular (apenas na primeira vez)
-7. Acompanhe os envios no console em tempo real
+2. Arraste os cards entre as colunas conforme o andamento do contato
+3. Clique em qualquer lead para ver detalhes, editar e adicionar notas
 
 ---
 
-## Encerrando o Sistema
+## WhatsApp — Disparando mensagens
 
-Basta fechar as 3 janelas do terminal. Seus dados ficam salvos automaticamente.
+1. Clique na aba **"WhatsApp"**
+2. Na primeira vez, escaneie o QR Code que aparece no terminal com seu celular
+3. Selecione os leads que quer contatar
+4. Edite o template (use `[NOME]` para personalizar automaticamente)
+5. Clique em **"Iniciar Disparos"**
 
 ---
 
-➡️ [Ver solução de problemas](./03-problemas.md)
+## Encerrando o sistema
+
+Feche as janelas do terminal. Os dados ficam salvos automaticamente.
