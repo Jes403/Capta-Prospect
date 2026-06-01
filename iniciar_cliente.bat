@@ -15,20 +15,19 @@ if %errorlevel% neq 0 (
     color 0C
     echo  [ERRO] Node.js nao esta instalado!
     echo.
-    echo  Acesse: https://nodejs.org
-    echo  Baixe a versao LTS e instale.
-    echo  Depois execute este arquivo novamente.
+    echo  Acesse: https://nodejs.org  ^|  Baixe a versao LTS
+    echo  Instale normalmente e execute este arquivo novamente.
     echo.
     pause
     exit /b
 )
 echo  [OK] Node.js encontrado.
 
-:: ── 2. Dependencias ───────────────────────────────────
+:: ── 2. Dependencias (so na primeira vez) ──────────────
 if not exist "node_modules" (
     echo.
-    echo  [!] Primeira execucao: instalando dependencias...
-    echo      Aguarde, isso leva alguns minutos.
+    echo  [!] Primeira execucao detectada.
+    echo      Instalando dependencias, aguarde...
     echo.
     npm install --silent
     if %errorlevel% neq 0 (
@@ -40,31 +39,17 @@ if not exist "node_modules" (
         pause
         exit /b
     )
-    echo  [OK] Dependencias instaladas.
+    echo  [OK] Dependencias instaladas com sucesso.
+    echo.
 )
 
-:: ── 3. Arquivo .env ────────────────────────────────────
-if not exist ".env" (
-    color 0C
-    echo.
-    echo  [ERRO] Arquivo .env nao encontrado!
-    echo.
-    echo  Renomeie o arquivo ".env.example" para ".env"
-    echo  e preencha com suas chaves de API.
-    echo.
-    pause
-    exit /b
-)
-echo  [OK] Configuracoes encontradas.
-
-:: ── 4. Banco de dados ──────────────────────────────────
+:: ── 3. Avisa se banco da Receita Federal nao estiver ──
 if not exist "data\receita_federal.db" (
-    echo.
     color 0E
     echo  [AVISO] Banco da Receita Federal nao encontrado.
     echo.
-    echo  A extracao de empresas estara desativada.
-    echo  Para ativar: copie "receita_federal.db" para a pasta "data\".
+    echo  Extracao de empresas estara desativada.
+    echo  Para ativar: coloque "receita_federal.db" na pasta "data\".
     echo.
     color 0A
     timeout /t 3 /nobreak >nul
@@ -72,40 +57,34 @@ if not exist "data\receita_federal.db" (
     echo  [OK] Banco da Receita Federal encontrado.
 )
 
-:: ── 5. Encerra processo antigo se ainda estiver rodando
-echo.
-echo  Verificando porta 3007...
+:: ── 4. Encerra instancia anterior se existir ──────────
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3007 " 2^>nul') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 
-:: ── 6. Inicia o servidor ───────────────────────────────
+:: ── 5. Inicia o servidor ───────────────────────────────
+echo.
 echo  Iniciando servidor...
-echo.
-start "CAPTA PROSPECT" cmd /k "color 0A && title CAPTA PROSPECT - Servidor && echo. && echo  Servidor iniciando, aguarde... && echo. && node server/index.js"
+start "CAPTA PROSPECT - Servidor" cmd /k "color 0A && title CAPTA PROSPECT - Servidor && node server/index.js"
 
-:: ── 7. Aguarda e abre o navegador ─────────────────────
-echo  Aguardando servidor ficar pronto...
-timeout /t 5 /nobreak >nul
-
+:: ── 6. Aguarda o servidor responder ───────────────────
+echo  Aguardando sistema ficar pronto...
 :aguarda
+timeout /t 2 /nobreak >nul
 curl -s http://localhost:3007/api/health >nul 2>&1
-if %errorlevel% neq 0 (
-    timeout /t 2 /nobreak >nul
-    goto aguarda
-)
+if %errorlevel% neq 0 goto aguarda
 
-echo  [OK] Servidor pronto!
-echo.
-echo  Abrindo no navegador...
+:: ── 7. Abre o navegador ────────────────────────────────
 start http://localhost:3007
 
 echo.
 echo  =====================================================
-echo   Sistema iniciado em: http://localhost:3007
+echo   Sistema pronto em: http://localhost:3007
 echo.
-echo   Para o QR do WhatsApp, veja a outra janela.
-echo   Nao feche a janela "CAPTA PROSPECT - Servidor"!
+echo   QR do WhatsApp: veja a janela "CAPTA PROSPECT - Servidor"
+echo   Diagnostico:    http://localhost:3007/status
+echo.
+echo   Nao feche a janela do servidor!
 echo  =====================================================
 echo.
 timeout /t 5 /nobreak >nul

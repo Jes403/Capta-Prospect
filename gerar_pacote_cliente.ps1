@@ -49,15 +49,19 @@ foreach ($item in $itens) {
     }
 }
 
-# Cria o .env preenchido para o cliente (sem chaves sensiveis de dev)
+# Cria o .env do cliente a partir do .env local ou do .env.example
 Write-Host "[4/5] Gerando .env do cliente..." -ForegroundColor Yellow
-$envOrigem = Join-Path $origem ".env"
 $envDestino = Join-Path $destino ".env"
-if (Test-Path $envOrigem) {
-    Copy-Item $envOrigem $envDestino -Force
-    Write-Host "   .env copiado (revise as chaves antes de entregar!)" -ForegroundColor Yellow
+$envLocal   = Join-Path $origem ".env"
+$envExample = Join-Path $origem ".env.example"
+if (Test-Path $envLocal) {
+    Copy-Item $envLocal $envDestino -Force
+    Write-Host "   .env copiado do arquivo local." -ForegroundColor Gray
+} elseif (Test-Path $envExample) {
+    Copy-Item $envExample $envDestino -Force
+    Write-Host "   .env gerado a partir do .env.example (chaves ja preenchidas)." -ForegroundColor Gray
 } else {
-    Write-Host "   AVISO: .env nao encontrado, copie manualmente." -ForegroundColor Red
+    Write-Host "   AVISO: nenhum .env encontrado. Cliente precisara configurar manualmente." -ForegroundColor Red
 }
 
 Write-Host "[5/5] Gerando instrucoes de instalacao..." -ForegroundColor Yellow
