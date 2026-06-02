@@ -62,6 +62,24 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3007 " 2^>nul') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 
+:: ── 4b. Compila o frontend se necessario ───────────────
+if not exist "dist" (
+    echo.
+    echo  [!] Compilando o frontend, aguarde...
+    echo.
+    npm run build
+    if %errorlevel% neq 0 (
+        color 0C
+        echo.
+        echo  [ERRO] Falha ao compilar o frontend.
+        echo.
+        pause
+        exit /b
+    )
+    echo  [OK] Frontend compilado com sucesso.
+    echo.
+)
+
 :: ── 5. Inicia o servidor ───────────────────────────────
 echo.
 echo  Iniciando servidor...
