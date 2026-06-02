@@ -69,10 +69,7 @@ start "CAPTA PROSPECT - Servidor" cmd /k "color 0A && title CAPTA PROSPECT - Ser
 
 :: ── 6. Aguarda o servidor responder ───────────────────
 echo  Aguardando sistema ficar pronto...
-:aguarda
-timeout /t 2 /nobreak >nul
-curl -s http://localhost:3007/api/health >nul 2>&1
-if %errorlevel% neq 0 goto aguarda
+timeout /t 8 /nobreak >nul
 
 :: ── 7. Abre o navegador ────────────────────────────────
 start http://localhost:3007
