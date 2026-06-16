@@ -23,13 +23,29 @@ if %errorlevel% neq 0 (
 )
 echo  [OK] Node.js encontrado.
 
-:: ── 2. Dependencias (so na primeira vez) ──────────────
+:: ── 2. Arquivo .env ────────────────────────────────────
+if not exist ".env" (
+    if exist ".env.example" (
+        copy ".env.example" ".env" >nul
+        echo  [OK] Arquivo .env criado automaticamente.
+    ) else (
+        color 0C
+        echo  [ERRO] Arquivo .env nao encontrado. Contate o suporte.
+        echo.
+        pause
+        exit /b
+    )
+) else (
+    echo  [OK] Arquivo .env encontrado.
+)
+
+:: ── 3. Dependencias ────────────────────────────────────
 if not exist "node_modules" (
     echo.
-    echo  [!] Primeira execucao detectada.
-    echo      Instalando dependencias, aguarde...
+    echo  [!] Primeira execucao - Instalando dependencias...
+    echo      Isso pode demorar alguns minutos. Aguarde.
     echo.
-    npm install --silent
+    npm install
     if %errorlevel% neq 0 (
         color 0C
         echo.
@@ -43,7 +59,29 @@ if not exist "node_modules" (
     echo.
 )
 
-:: ── 3. Avisa se banco da Receita Federal nao estiver ──
+:: ── 4. Chrome do Puppeteer (extracao Google Maps) ──────
+if not exist ".puppeteer_ready" (
+    echo.
+    echo  [!] Instalando Chrome para extracao de leads...
+    echo      Aguarde, pode demorar alguns minutos...
+    echo.
+    npx puppeteer browsers install chrome
+    if %errorlevel% neq 0 (
+        color 0E
+        echo.
+        echo  [AVISO] Falha ao instalar Chrome do Puppeteer.
+        echo  Extracao via Google Maps pode nao funcionar.
+        echo.
+        color 0A
+        timeout /t 3 /nobreak >nul
+    ) else (
+        echo 1 > .puppeteer_ready
+        echo  [OK] Chrome instalado com sucesso.
+        echo.
+    )
+)
+
+:: ── 5. Banco da Receita Federal ────────────────────────
 if not exist "data\receita_federal.db" (
     color 0E
     echo  [AVISO] Banco da Receita Federal nao encontrado.
@@ -57,12 +95,12 @@ if not exist "data\receita_federal.db" (
     echo  [OK] Banco da Receita Federal encontrado.
 )
 
-:: ── 4. Encerra instancia anterior se existir ──────────
+:: ── 6. Encerra instancia anterior se existir ──────────
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3007 " 2^>nul') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 
-:: ── 4b. Compila o frontend se necessario ───────────────
+:: ── 7. Compila o frontend se necessario ───────────────
 if not exist "dist" (
     echo.
     echo  [!] Compilando o frontend, aguarde...
@@ -80,16 +118,16 @@ if not exist "dist" (
     echo.
 )
 
-:: ── 5. Inicia o servidor ───────────────────────────────
+:: ── 8. Inicia o servidor ───────────────────────────────
 echo.
 echo  Iniciando servidor...
 start "CAPTA PROSPECT - Servidor" cmd /k "color 0A && title CAPTA PROSPECT - Servidor && node server/index.js"
 
-:: ── 6. Aguarda o servidor responder ───────────────────
+:: ── 9. Aguarda o servidor responder ───────────────────
 echo  Aguardando sistema ficar pronto...
 timeout /t 8 /nobreak >nul
 
-:: ── 7. Abre o navegador ────────────────────────────────
+:: ── 10. Abre o navegador ───────────────────────────────
 start http://localhost:3007
 
 echo.
