@@ -59,29 +59,7 @@ if not exist "node_modules" (
     echo.
 )
 
-:: ── 4. Chrome do Puppeteer (extracao Google Maps) ──────
-if not exist ".puppeteer_ready" (
-    echo.
-    echo  [!] Instalando Chrome para extracao de leads...
-    echo      Aguarde, pode demorar alguns minutos...
-    echo.
-    npx puppeteer browsers install chrome
-    if %errorlevel% neq 0 (
-        color 0E
-        echo.
-        echo  [AVISO] Falha ao instalar Chrome do Puppeteer.
-        echo  Extracao via Google Maps pode nao funcionar.
-        echo.
-        color 0A
-        timeout /t 3 /nobreak >nul
-    ) else (
-        echo 1 > .puppeteer_ready
-        echo  [OK] Chrome instalado com sucesso.
-        echo.
-    )
-)
-
-:: ── 5. Banco da Receita Federal ────────────────────────
+:: ── 4. Banco da Receita Federal ────────────────────────
 if not exist "data\receita_federal.db" (
     color 0E
     echo  [AVISO] Banco da Receita Federal nao encontrado.
